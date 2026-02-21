@@ -108,7 +108,7 @@ class BenchmarkSuite:
         variables: Sequence[str] | None = None,
         n_samples: int = 1000,
         seed: int = 42,
-    ) -> BenchmarkReport:
+    ) -> "BenchmarkReport":
         """
         Run the benchmark.
 
