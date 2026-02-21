@@ -189,7 +189,8 @@ class BenchmarkReport:
   <div class="meta">
     Generated: {self.generated_at.strftime('%Y-%m-%d %H:%M UTC')} &nbsp;·&nbsp;
     Reference: <span class="badge">{self.reference.name}</span> &nbsp;·&nbsp;
-    Candidates: {' '.join(f'<span class="badge">{c.name}</span>' for c in self.candidates)}
+    Candidates: {''.join(
+        f'<span class="badge">{c.name}</span>' for c in self.candidates)}
   </div>
 </header>
 <table>
