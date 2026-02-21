@@ -191,7 +191,7 @@ class TaylorSkillScore(BaseMetric):
     name = "taylor_skill_score"
     higher_is_better = True
 
-    def __init__(self, r0: float = 1.0):
+    def __init__(self, r0: float = 1.0) -> None:
         self.r0 = r0  # maximum attainable correlation
 
     def compute(
@@ -222,7 +222,7 @@ class PercentileBias(BaseMetric):
     name = "percentile_bias"
     higher_is_better = False
 
-    def __init__(self, percentile: float = 95.0):
+    def __init__(self, percentile: float = 95.0) -> None:
         self.percentile = percentile
         self.name = f"percentile_bias_p{int(percentile)}"
 
