@@ -16,18 +16,22 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from climval.metrics.stats import DEFAULT_METRICS, BaseMetric
 from climval.models.schema import BenchmarkResult, ClimateModel, MetricResult
 
+if TYPE_CHECKING:
+    from climval.core.report import BenchmarkReport
+
 logger = logging.getLogger(__name__)
 
 
 class BenchmarkSuite:
     """
-    Orchestrates multi-model climvaling.
+    Orchestrates multi-model climate validation.
 
     Parameters
     ----------
@@ -108,7 +112,7 @@ class BenchmarkSuite:
         variables: Sequence[str] | None = None,
         n_samples: int = 1000,
         seed: int = 42,
-    ) -> "BenchmarkReport":
+    ) -> BenchmarkReport:
         """
         Run the benchmark.
 
@@ -154,8 +158,8 @@ class BenchmarkSuite:
             )
             results.append(result)
 
-        from climval.core.report import BenchmarkReport
-        return BenchmarkReport(
+        from climval.core.report import BenchmarkReport as _BenchmarkReport
+        return _BenchmarkReport(
             suite_name=self.name,
             reference=self._reference,
             candidates=self._candidates,
@@ -239,8 +243,7 @@ class BenchmarkSuite:
                 reference.source_path, candidate.source_path, var_name
             )
 
-        # Synthetic fallback: reference is "truth", candidate has bias + noise
-        ref_data = rng.normal(loc=288.0, scale=15.0, size=n_samples)  # ~15°C in K
+        ref_data = rng.normal(loc=288.0, scale=15.0, size=n_samples)
         bias = rng.uniform(-3.0, 3.0)
         noise_scale = rng.uniform(0.5, 2.5)
         can_data = ref_data + bias + rng.normal(0, noise_scale, n_samples)
