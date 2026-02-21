@@ -15,11 +15,7 @@ References:
 
 from __future__ import annotations
 
-import math
-from typing import Optional
-
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Base class
@@ -36,7 +32,7 @@ class BaseMetric:
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         raise NotImplementedError
 
@@ -58,7 +54,7 @@ class RMSE(BaseMetric):
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         diff = candidate - reference
         if weights is not None:
@@ -77,7 +73,7 @@ class MAE(BaseMetric):
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         diff = np.abs(candidate - reference)
         if weights is not None:
@@ -96,7 +92,7 @@ class MeanBias(BaseMetric):
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         diff = candidate - reference
         if weights is not None:
@@ -118,7 +114,7 @@ class NormalizedRMSE(BaseMetric):
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         rmse_val = RMSE().compute(reference, candidate, weights)
         std_ref = float(np.std(reference))
@@ -141,7 +137,7 @@ class PearsonCorrelation(BaseMetric):
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         if weights is not None:
             weights = weights / weights.sum()
@@ -172,7 +168,7 @@ class SpearmanCorrelation(BaseMetric):
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         from scipy.stats import spearmanr
         r, _ = spearmanr(reference.ravel(), candidate.ravel())
@@ -202,7 +198,7 @@ class TaylorSkillScore(BaseMetric):
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         r = PearsonCorrelation().compute(reference, candidate, weights)
         std_f = float(np.std(candidate))
@@ -234,7 +230,7 @@ class PercentileBias(BaseMetric):
         self,
         reference: np.ndarray,
         candidate: np.ndarray,
-        weights: Optional[np.ndarray] = None,
+        weights: np.ndarray | None = None,
     ) -> float:
         q_ref = float(np.percentile(reference, self.percentile))
         q_can = float(np.percentile(candidate, self.percentile))

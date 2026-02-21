@@ -1,14 +1,14 @@
 from climval.models.schema import (
+    STANDARD_VARIABLES,
+    BenchmarkResult,
     ClimateModel,
     ClimateVariable,
     MetricResult,
-    BenchmarkResult,
-    SpatialDomain,
-    TemporalDomain,
     ModelType,
-    TemporalResolution,
+    SpatialDomain,
     SpatialResolution,
-    STANDARD_VARIABLES,
+    TemporalDomain,
+    TemporalResolution,
 )
 
 __all__ = [

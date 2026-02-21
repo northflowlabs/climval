@@ -32,9 +32,9 @@ __version__ = "0.1.0"
 __author__ = "Northflow Technologies"
 __license__ = "Apache-2.0"
 
-from climval.core.suite import BenchmarkSuite
 from climval.core.loader import load_model
 from climval.core.report import BenchmarkReport
+from climval.core.suite import BenchmarkSuite
 
 __all__ = [
     "BenchmarkSuite",

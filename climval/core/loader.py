@@ -9,11 +9,10 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-
-import numpy as np
+from typing import Any
 
 from climval.models.schema import (
+    STANDARD_VARIABLES,
     ClimateModel,
     ClimateVariable,
     ModelType,
@@ -21,7 +20,6 @@ from climval.models.schema import (
     SpatialResolution,
     TemporalDomain,
     TemporalResolution,
-    STANDARD_VARIABLES,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +28,7 @@ logger = logging.getLogger(__name__)
 # Known dataset presets
 # ---------------------------------------------------------------------------
 
-_PRESETS: Dict[str, Dict[str, Any]] = {
+_PRESETS: dict[str, dict[str, Any]] = {
     "era5": {
         "model_type": ModelType.REANALYSIS,
         "spatial_resolution": SpatialResolution.HIGH,
@@ -69,19 +67,19 @@ _PRESETS: Dict[str, Dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 def load_model(
-    preset: Optional[str] = None,
+    preset: str | None = None,
     *,
-    name: Optional[str] = None,
-    path: Optional[Union[str, Path]] = None,
+    name: str | None = None,
+    path: str | Path | None = None,
     model_type: ModelType = ModelType.CUSTOM,
-    variables: Optional[List[str]] = None,
+    variables: list[str] | None = None,
     lat_range: tuple[float, float] = (-90.0, 90.0),
     lon_range: tuple[float, float] = (-180.0, 180.0),
-    time_start: Optional[datetime] = None,
-    time_end: Optional[datetime] = None,
+    time_start: datetime | None = None,
+    time_end: datetime | None = None,
     spatial_resolution: SpatialResolution = SpatialResolution.MEDIUM,
     temporal_resolution: TemporalResolution = TemporalResolution.MONTHLY,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
 ) -> ClimateModel:
     """
     Load a climate model for benchmarking.
@@ -141,7 +139,7 @@ def load_model(
 
     # Resolve variables
     var_keys = variables or list(STANDARD_VARIABLES.keys())
-    resolved_vars: List[ClimateVariable] = []
+    resolved_vars: list[ClimateVariable] = []
     for vk in var_keys:
         if vk in STANDARD_VARIABLES:
             resolved_vars.append(STANDARD_VARIABLES[vk])

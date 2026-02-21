@@ -1,15 +1,15 @@
 from climval.metrics.stats import (
-    BaseMetric,
-    RMSE,
+    DEFAULT_METRICS,
     MAE,
+    METRIC_REGISTRY,
+    RMSE,
+    BaseMetric,
     MeanBias,
     NormalizedRMSE,
     PearsonCorrelation,
+    PercentileBias,
     SpearmanCorrelation,
     TaylorSkillScore,
-    PercentileBias,
-    DEFAULT_METRICS,
-    METRIC_REGISTRY,
     get_metric,
 )
 

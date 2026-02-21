@@ -10,7 +10,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from climval.metrics.stats import BaseMetric
 from climval.models.schema import BenchmarkResult, ClimateModel
@@ -36,9 +36,9 @@ class BenchmarkReport:
         self,
         suite_name: str,
         reference: ClimateModel,
-        candidates: List[ClimateModel],
-        results: List[BenchmarkResult],
-        metrics_used: List[BaseMetric],
+        candidates: list[ClimateModel],
+        results: list[BenchmarkResult],
+        metrics_used: list[BaseMetric],
     ) -> None:
         self.suite_name = suite_name
         self.reference = reference
@@ -51,7 +51,7 @@ class BenchmarkReport:
     # Serialization
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "suite_name": self.suite_name,
             "generated_at": self.generated_at.isoformat(),
@@ -108,11 +108,11 @@ class BenchmarkReport:
     def _render_markdown(self) -> str:
         lines = [
             f"# ClimVal Report — {self.suite_name}",
-            f"",
+            "",
             f"**Generated:** {self.generated_at.strftime('%Y-%m-%d %H:%M UTC')}  ",
             f"**Reference:** {self.reference.name}  ",
             f"**Candidates:** {', '.join(c.name for c in self.candidates)}",
-            f"",
+            "",
         ]
         for result in self.results:
             lines.append(f"## {result.candidate} vs {result.reference}")

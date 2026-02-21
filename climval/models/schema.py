@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ModelType(str, Enum):
@@ -43,7 +43,7 @@ class SpatialDomain:
     lat_max: float
     lon_min: float
     lon_max: float
-    description: Optional[str] = None
+    description: str | None = None
 
     def area_deg2(self) -> float:
         return abs(self.lat_max - self.lat_min) * abs(self.lon_max - self.lon_min)
@@ -75,11 +75,11 @@ class ClimateVariable:
     name: str                        # e.g. "tas" (near-surface air temperature)
     long_name: str                   # e.g. "Near-Surface Air Temperature"
     units: str                       # e.g. "K"
-    standard_name: Optional[str] = None  # CF convention
-    description: Optional[str] = None
+    standard_name: str | None = None  # CF convention
+    description: str | None = None
 
 
-STANDARD_VARIABLES: Dict[str, ClimateVariable] = {
+STANDARD_VARIABLES: dict[str, ClimateVariable] = {
     "tas": ClimateVariable(
         name="tas",
         long_name="Near-Surface Air Temperature",
@@ -128,13 +128,13 @@ class ClimateModel:
     """
     name: str
     model_type: ModelType
-    variables: List[ClimateVariable]
+    variables: list[ClimateVariable]
     spatial_domain: SpatialDomain
     temporal_domain: TemporalDomain
     spatial_resolution: SpatialResolution
     temporal_resolution: TemporalResolution
-    source_path: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    source_path: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     loaded_at: datetime = field(default_factory=datetime.utcnow)
 
     def summary(self) -> str:
@@ -160,7 +160,7 @@ class MetricResult:
     description: str
     reference_model: str
     candidate_model: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -168,10 +168,10 @@ class BenchmarkResult:
     """Full benchmark result for a model pair."""
     reference: str
     candidate: str
-    metrics: List[MetricResult] = field(default_factory=list)
+    metrics: list[MetricResult] = field(default_factory=list)
     computed_at: datetime = field(default_factory=datetime.utcnow)
-    passed: Optional[bool] = None
+    passed: bool | None = None
     notes: str = ""
 
-    def score_summary(self) -> Dict[str, float]:
+    def score_summary(self) -> dict[str, float]:
         return {m.metric_name: m.value for m in self.metrics}

@@ -15,11 +15,11 @@ Usage
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
-from climval.metrics.stats import BaseMetric, DEFAULT_METRICS
+from climval.metrics.stats import DEFAULT_METRICS, BaseMetric
 from climval.models.schema import BenchmarkResult, ClimateModel, MetricResult
 
 logger = logging.getLogger(__name__)
@@ -49,13 +49,13 @@ class BenchmarkSuite:
 
     def __init__(
         self,
-        metrics: Optional[List[BaseMetric]] = None,
+        metrics: list[BaseMetric] | None = None,
         name: str = "benchmark",
     ) -> None:
         self.name = name
-        self.metrics: List[BaseMetric] = metrics or list(DEFAULT_METRICS)
-        self._reference: Optional[ClimateModel] = None
-        self._candidates: List[ClimateModel] = []
+        self.metrics: list[BaseMetric] = metrics or list(DEFAULT_METRICS)
+        self._reference: ClimateModel | None = None
+        self._candidates: list[ClimateModel] = []
 
     # ------------------------------------------------------------------
     # Registration
@@ -65,7 +65,7 @@ class BenchmarkSuite:
         self,
         model: ClimateModel,
         role: str = "candidate",
-    ) -> "BenchmarkSuite":
+    ) -> BenchmarkSuite:
         """
         Register a model.
 
@@ -94,7 +94,7 @@ class BenchmarkSuite:
 
         return self
 
-    def add_metric(self, metric: BaseMetric) -> "BenchmarkSuite":
+    def add_metric(self, metric: BaseMetric) -> BenchmarkSuite:
         """Add a custom metric to the suite."""
         self.metrics.append(metric)
         return self
@@ -105,10 +105,10 @@ class BenchmarkSuite:
 
     def run(
         self,
-        variables: Optional[Sequence[str]] = None,
+        variables: Sequence[str] | None = None,
         n_samples: int = 1000,
         seed: int = 42,
-    ) -> "BenchmarkReport":
+    ) -> BenchmarkReport:
         """
         Run the benchmark.
 
@@ -142,7 +142,7 @@ class BenchmarkSuite:
             )
 
         rng = np.random.default_rng(seed)
-        results: List[BenchmarkResult] = []
+        results: list[BenchmarkResult] = []
 
         for candidate in self._candidates:
             result = self._compare(
@@ -167,7 +167,7 @@ class BenchmarkSuite:
         self,
         reference: ClimateModel,
         candidate: ClimateModel,
-        variables: Optional[Sequence[str]],
+        variables: Sequence[str] | None,
         rng: np.random.Generator,
         n_samples: int,
     ) -> BenchmarkResult:
@@ -185,7 +185,7 @@ class BenchmarkSuite:
         else:
             target_vars = shared
 
-        metric_results: List[MetricResult] = []
+        metric_results: list[MetricResult] = []
 
         for var_name in sorted(target_vars):
             ref_data, can_data = self._get_arrays(
