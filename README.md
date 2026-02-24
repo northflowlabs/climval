@@ -6,7 +6,7 @@ An open, composable framework for comparing climate model outputs against
 reference datasets. Built for researchers, universities, and infrastructure
 teams working with CMIP6, ERA5, CORDEX, and custom simulation data.
 
-[![CI](https://github.com/northflow-technologies/climval/actions/workflows/ci.yml/badge.svg)](https://github.com/northflow-technologies/climval/actions)
+[![CI](https://github.com/northflowlabs/climval/actions/workflows/ci.yml/badge.svg)](https://github.com/northflowlabs/climval/actions)
 [![PyPI](https://img.shields.io/pypi/v/climval)](https://pypi.org/project/climval/)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
@@ -46,26 +46,65 @@ use, CI/CD pipelines, and long-running research workflows.
 
 ```python
 from datetime import datetime
-from climval import BenchmarkSuite, load_model
-
-era5 = load_model(
-    "era5",
-    name="ERA5",
-    lat_range=(35.0, 72.0),          # Europe
-    lon_range=(-10.0, 40.0),
-    time_start=datetime(2000, 1, 1),
-    time_end=datetime(2020, 12, 31),
+import numpy as np
+from climval import BenchmarkSuite
+from climval.metrics import RMSE, MAE, MeanBias, PearsonCorrelation, TaylorSkillScore
+from climval.models.schema import (
+    ClimateModel, ModelType, SpatialDomain,
+    TemporalDomain, SpatialResolution, TemporalResolution,
+    ClimateVariable
 )
 
-mpi = load_model("cmip6-mpi", name="MPI-ESM1-2-HR")
+# Define your reference dataset (e.g. ERA5)
+era5 = ClimateModel(
+    name="ERA5",
+    model_type=ModelType.REANALYSIS,
+    spatial_domain=SpatialDomain(
+        lat_min=39.0, lat_max=40.0,
+        lon_min=-0.5, lon_max=0.5,
+    ),
+    temporal_domain=TemporalDomain(
+        start=datetime(2025, 6, 1),
+        end=datetime(2025, 6, 30),
+    ),
+    spatial_resolution=SpatialResolution.LOW,
+    temporal_resolution=TemporalResolution.HOURLY,
+    variables=[
+        ClimateVariable(name="tas", long_name="Near-Surface Air Temperature",
+                        units="K", standard_name="air_temperature")
+    ],
+    metadata={"source": "Copernicus Climate Data Store (CDS)"},
+)
 
-suite = BenchmarkSuite(name="Europe-2000-2020")
+# Define your candidate dataset (e.g. Sentinel-3 SLSTR LST)
+sentinel3 = ClimateModel(
+    name="Sentinel-3 SLSTR LST",
+    model_type=ModelType.OBSERVATION,
+    spatial_domain=SpatialDomain(
+        lat_min=39.0, lat_max=40.0,
+        lon_min=-0.5, lon_max=0.5,
+    ),
+    temporal_domain=TemporalDomain(
+        start=datetime(2025, 6, 1),
+        end=datetime(2025, 6, 30),
+    ),
+    spatial_resolution=SpatialResolution.HIGH,
+    temporal_resolution=TemporalResolution.DAILY,
+    variables=[
+        ClimateVariable(name="tas", long_name="Land Surface Temperature",
+                        units="K", standard_name="surface_temperature")
+    ],
+    metadata={"source": "EOPF Sentinel Zarr Samples Service (EODC)"},
+)
+
+# Run benchmark
+suite = BenchmarkSuite(name="S3-LST-vs-ERA5")
 suite.register(era5, role="reference")
-suite.register(mpi)
+suite.register(sentinel3)
 
-report = suite.run(variables=["tas", "pr"])
+report = suite.run(variables=["tas"], seed=42)
 report.summary()
-report.export("results/report.html")
+report.export("validation_report.html")
 ```
 
 Output:
@@ -113,7 +152,7 @@ pip install "climval[viz]"
 
 **Development:**
 ```bash
-git clone https://github.com/northflow-technologies/climval
+git clone https://github.com/northflowlabs/climval
 cd climval
 pip install -e ".[dev]"
 pytest
@@ -319,7 +358,7 @@ These tools solve different problems at different layers of the stack. `climval`
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
-git clone https://github.com/northflow-technologies/climval
+git clone https://github.com/northflowlabs/climval
 cd climval
 pip install -e ".[dev]"
 pytest && ruff check . && mypy climval/
@@ -333,4 +372,5 @@ Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
-*Built by [Northflow Technologies](https://northflow.tech)*
+*Built by [Northflow Technologies](https://northflow.no) — open-source AI-native infrastructure for climate, space, and research.*  
+*Used in the [EOPF Zarr Community Notebook Competition 2026](https://github.com/eopf-toolkit/community-notebook-competition).*
