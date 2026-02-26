@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "climval"
-version = "0.1.0"
+version = "0.1.1"
 description = "Climate model validation and benchmarking framework"
-authors = [{ name = "Northflow Technologies", email = "open@northflow.tech" }]
+authors = [{ name = "Northflow Technologies", email = "hello@northflow.no" }]
 license = { text = "Apache-2.0" }
 readme = "README.md"
 requires-python = ">=3.10"
@@ -41,7 +41,16 @@ dev    = [
     "ruff>=0.1",
     "mypy>=1.5",
 ]
-all = ["climval[netcdf,viz,dev]"]
+all = [
+    "xarray>=2023.1",
+    "netCDF4>=1.6",
+    "matplotlib>=3.7",
+    "cartopy>=0.21",
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+    "mypy>=1.5",
+]
 
 [project.scripts]
 climval = "climval.cli:main"
