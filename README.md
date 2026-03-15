@@ -376,5 +376,4 @@ Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
-*Built by [Northflow Technologies](https://northflow.no) — open-source AI-native infrastructure for climate, space, and research.*  
-*Used in the [EOPF Zarr Community Notebook Competition 2026](https://github.com/eopf-toolkit/community-notebook-competition).*
+*Built by [Northflow Technologies](https://northflow.no) — open-source AI-native infrastructure for climate, space, and research.*
