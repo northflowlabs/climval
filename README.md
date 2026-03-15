@@ -1,5 +1,8 @@
 # climval
 
+**Northflow Technologies** · [northflow.no](https://northflow.no)  
+*Institutional scientific discovery infrastructure for climate, space, and critical systems*
+
 **Climate model validation and benchmarking, done right.**
 
 An open, composable framework for comparing climate model outputs against
