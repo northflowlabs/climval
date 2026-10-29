@@ -1,7 +1,7 @@
 """
 climval.core.report
 ==============================
-BenchmarkReport — structured output with HTML, JSON, and console export.
+BenchmarkReport: structured output with HTML, JSON, and console export.
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ class BenchmarkReport:
 
     def _render_markdown(self) -> str:
         lines = [
-            f"# ClimVal Report — {self.suite_name}",
+            f"# ClimVal Report: {self.suite_name}",
             "",
             f"**Generated:** {self.generated_at.strftime('%Y-%m-%d %H:%M UTC')}  ",
             f"**Reference:** {self.reference.name}  ",
@@ -150,7 +150,7 @@ class BenchmarkReport:
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>ClimVal — {self.suite_name}</title>
+<title>ClimVal: {self.suite_name}</title>
 <style>
   :root {{
     --bg: #0d1117;
@@ -185,7 +185,7 @@ class BenchmarkReport:
 </head>
 <body>
 <header>
-  <h1>⬡ ClimVal — {self.suite_name}</h1>
+  <h1>⬡ ClimVal: {self.suite_name}</h1>
   <div class="meta">
     Generated: {self.generated_at.strftime('%Y-%m-%d %H:%M UTC')} &nbsp;·&nbsp;
     Reference: <span class="badge">{self.reference.name}</span> &nbsp;·&nbsp;
@@ -203,7 +203,7 @@ class BenchmarkReport:
   <tbody>
 {rows_html}  </tbody>
 </table>
-<footer>climval · open source · Apache-2.0 · northflow.tech</footer>
+<footer>climval · Apache-2.0 · Northflow Technologies AS · northflow.no</footer>
 </body>
 </html>"""
 
@@ -214,7 +214,7 @@ class BenchmarkReport:
     def summary(self) -> None:
         """Print a formatted summary table to stdout."""
         print(f"\n{'═' * 72}")
-        print(f"  CLIMVAL — {self.suite_name.upper()}")
+        print(f"  CLIMVAL: {self.suite_name.upper()}")
         print(f"  Reference : {self.reference.name}")
         print(f"  Generated : {self.generated_at.strftime('%Y-%m-%d %H:%M UTC')}")
         print(f"{'═' * 72}\n")

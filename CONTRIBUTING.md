@@ -5,7 +5,7 @@ Thank you for your interest in contributing.
 ## Development setup
 
 ```bash
-git clone https://github.com/northflow-technologies/climval
+git clone https://github.com/northflowlabs/climval
 cd climval
 pip install -e ".[dev]"
 ```

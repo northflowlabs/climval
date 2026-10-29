@@ -1,50 +1,29 @@
+<a href="https://northflow.no"><img src=".github/assets/northflow-mark.svg" alt="Northflow" width="40" height="40"></a>
+
 # climval
 
-**Northflow Technologies** · [northflow.no](https://northflow.no)  
-*Institutional scientific discovery infrastructure for climate, space, and critical systems*
+climval is a Python library that validates and benchmarks climate model output against reference datasets.
 
-**Climate model validation and benchmarking, done right.**
+[Research page](https://research.northflow.no/systems/climval) · [PyPI](https://pypi.org/project/climval/) · [Notebooks](https://github.com/northflowlabs/northflow-notebooks) · [Licence](#licence)
 
-An open, composable framework for comparing climate model outputs against
-reference datasets. Built for researchers, universities, and infrastructure
-teams working with CMIP6, ERA5, CORDEX, and custom simulation data.
-
-[![CI](https://github.com/northflowlabs/climval/actions/workflows/ci.yml/badge.svg)](https://github.com/northflowlabs/climval/actions)
-[![PyPI](https://img.shields.io/pypi/v/climval)](https://pypi.org/project/climval/)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
-[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/northflowlabs/climval/HEAD?filepath=examples/cmip6_taylor_diagram.ipynb)
-
----
+[![PyPI](https://img.shields.io/pypi/v/climval?color=0e6b63)](https://pypi.org/project/climval/)
+[![CI](https://github.com/northflowlabs/climval/actions/workflows/ci.yml/badge.svg)](https://github.com/northflowlabs/climval/actions/workflows/ci.yml)
+[![Licence: Apache 2.0](https://img.shields.io/badge/licence-Apache%202.0-0e6b63)](LICENSE)
 
 ## Why climval
 
-Climate model comparison is routine science but operationally fragmented.
-Every lab has a slightly different set of scripts for RMSE, bias, Taylor diagrams.
-Results are rarely reproducible across groups.
-
-`climval` provides a **typed, composable, reproducible** interface for
-multi-model validation — designed from the ground up to support institutional
-use, CI/CD pipelines, and long-running research workflows.
-
----
+Every lab compares climate models with its own scripts for RMSE, bias and Taylor diagrams, and the results rarely reproduce across groups. climval gives that comparison a typed, composable Python interface that runs the same way on a laptop, in a CI pipeline and in a long research workflow. It works with CMIP6, ERA5, CORDEX and custom simulation data.
 
 ## Features
 
-- **Composable metric library** — RMSE, MAE, Mean Bias, Normalized RMSE, Pearson r,
-  Spearman r, Taylor Skill Score, percentile bias (P5/P95), and more
-- **Typed data models** — CF-convention variable definitions, spatial/temporal
-  domain objects, and structured `ValidationResult` schemas
-- **Known presets** — ERA5, ERA5-Land, CMIP6-MPI, CMIP6-HadGEM, CORDEX-EUR
-  out of the box
-- **NetCDF / CSV / Zarr support** — via `xarray` when real files are provided
-- **Synthetic fallback** — full structural validation and CI without data files
-- **Multi-format export** — HTML report, JSON, Markdown
-- **CLI** — run comparisons directly from the terminal
-- **Extensible** — plug in custom metrics, variables, and loaders
-
----
+- **Metric library:** RMSE, MAE, mean bias, normalised RMSE, Pearson r, Spearman r, Taylor skill score and percentile bias (P5, P95)
+- **Typed data models:** CF-convention variable definitions, spatial and temporal domain objects, and structured `ValidationResult` schemas
+- **Presets:** ERA5, ERA5-Land, CMIP6-MPI, CMIP6-HadGEM and CORDEX-EUR
+- **NetCDF, CSV and Zarr:** read through `xarray` when real files are provided
+- **Synthetic fallback:** structural validation and CI without data files
+- **Export:** HTML report, JSON and Markdown
+- **CLI:** run comparisons from the terminal
+- **Extensible:** add your own metrics, variables and loaders
 
 ## Quickstart
 
@@ -115,7 +94,7 @@ Output:
 
 ```
 ════════════════════════════════════════════════════════════════════════
-  CLIMVAL — EUROPE-2000-2020
+  CLIMVAL: EUROPE-2000-2020
   Reference : ERA5
   Generated : 2025-01-15 14:32 UTC
 ════════════════════════════════════════════════════════════════════════
@@ -134,8 +113,6 @@ Output:
   tas        percentile_bias_p5                -0.6058  %
   ...
 ```
-
----
 
 ## Installation
 
@@ -162,8 +139,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
----
-
 ## CLI
 
 ```bash
@@ -185,18 +160,16 @@ climval list-presets
 climval info --model era5
 ```
 
----
-
 ## Metrics
 
 | Metric | Name | Direction | Reference |
 |--------|------|-----------|-----------|
-| Root Mean Square Error | `rmse` | ↓ lower better | — |
-| Mean Absolute Error | `mae` | ↓ lower better | — |
-| Mean Bias | `mean_bias` | ↓ lower better | — |
-| Normalized RMSE | `nrmse` | ↓ lower better | — |
-| Pearson Correlation | `pearson_r` | ↑ higher better | — |
-| Spearman Correlation | `spearman_r` | ↑ higher better | — |
+| Root Mean Square Error | `rmse` | ↓ lower better |  |
+| Mean Absolute Error | `mae` | ↓ lower better |  |
+| Mean Bias | `mean_bias` | ↓ lower better |  |
+| Normalized RMSE | `nrmse` | ↓ lower better |  |
+| Pearson Correlation | `pearson_r` | ↑ higher better |  |
+| Spearman Correlation | `spearman_r` | ↑ higher better |  |
 | Taylor Skill Score | `taylor_skill_score` | ↑ higher better | Taylor (2001) |
 | Percentile Bias (P95) | `percentile_bias_p95` | ↓ lower better | Gleckler et al. (2008) |
 | Percentile Bias (P5) | `percentile_bias_p5` | ↓ lower better | Gleckler et al. (2008) |
@@ -220,8 +193,6 @@ class KGE(BaseMetric):
 
 suite.add_metric(KGE())
 ```
-
----
 
 ## Model Presets
 
@@ -249,8 +220,6 @@ model = load_model(
 )
 ```
 
----
-
 ## Standard Variables
 
 Follows [CF Conventions v1.10](https://cfconventions.org/). Built-in definitions:
@@ -264,8 +233,6 @@ Follows [CF Conventions v1.10](https://cfconventions.org/). Built-in definitions
 | `va` | Northward Wind | m s⁻¹ |
 | `hurs` | Near-Surface Relative Humidity | % |
 
----
-
 ## Export Formats
 
 | Format | Extension | Use case |
@@ -273,8 +240,6 @@ Follows [CF Conventions v1.10](https://cfconventions.org/). Built-in definitions
 | JSON | `.json` | Machine-readable, pipeline integration |
 | HTML | `.html` | Self-contained report, sharing |
 | Markdown | `.md` | GitHub/GitLab, documentation |
-
----
 
 ## Architecture
 
@@ -291,21 +256,19 @@ climval/
 └── cli.py              # climval CLI
 ```
 
----
+## Related tools
 
-## Ecosystem & Prior Art
-
-The climate model evaluation ecosystem has mature, powerful tools. `climval` is designed to complement them, not compete.
+Climate model evaluation has mature tools. climval works alongside them.
 
 ### ESMValTool
 
-[ESMValTool](https://www.esmvaltool.org/) is the community standard for comprehensive Earth System Model evaluation. Backed by ESA, CMIP, and a large consortium of European research institutions. If you are running **full diagnostic campaigns** against CMIP5/6 with pre-defined recipes, regridding pipelines, and multi-decadal observational datasets, ESMValTool is the right tool.
+[ESMValTool](https://www.esmvaltool.org/) is the community standard for Earth System Model evaluation, backed by ESA, CMIP and a consortium of European research institutions. If you are running **full diagnostic campaigns** against CMIP5/6 with pre-defined recipes, regridding pipelines, and multi-decadal observational datasets, ESMValTool is the right tool.
 
-It is also a 100,000+ line codebase with a multi-day installation process, YAML-recipe configuration, and a steep learning curve for anyone outside a dedicated climate modelling team.
+It is configured through YAML recipes and installed through conda, which suits a dedicated climate modelling team.
 
 ### PCMDI Metrics Package (PMP)
 
-[PMP](https://github.com/PCMDI/pcmdi_metrics), developed at Lawrence Livermore National Laboratory, provides a systematic framework for computing standardized performance metrics against observational references. Authoritative, widely cited in the literature, and complex to deploy outside a national lab environment.
+[PMP](https://github.com/PCMDI/pcmdi_metrics), developed at Lawrence Livermore National Laboratory, provides a systematic framework for computing standardized performance metrics against observational references. It is widely cited and takes work to deploy outside a national lab.
 
 ### ClimateLearn
 
@@ -313,19 +276,19 @@ It is also a 100,000+ line codebase with a multi-day installation process, YAML-
 
 ### Where `climval` fits
 
-`climval` occupies a different position in the stack:
+climval sits at a different layer:
 
 | | ESMValTool | PMP | **climval** |
 |---|---|---|---|
 | Installation | Complex, conda-heavy | Moderate | `pip install climval` |
 | Configuration | YAML recipes | Config files | Pure Python API |
-| Learning curve | Days–weeks | Days | Minutes |
+| Learning curve | Days to weeks | Days | Minutes |
 | CI/CD integration | Difficult | Difficult | Native |
 | Custom metrics | Recipe-based | Limited | `class MyMetric(BaseMetric)` |
 | Programmatic use | Partial | Partial | First-class |
 | Scope | Full diagnostic suite | Performance metrics | Composable validation |
 
-**`climval` is the right choice when you need:**
+**Use climval when you need:**
 - A reproducible validation step inside a Python pipeline or CI workflow
 - A composable API to integrate climate metrics into larger systems
 - Rapid prototyping, teaching, or lightweight institutional reporting
@@ -336,9 +299,7 @@ It is also a 100,000+ line codebase with a multi-day installation process, YAML-
 - Automated regridding and unit harmonization across large multi-model ensembles
 - Figures and diagnostics that conform to IPCC or CMIP reporting standards
 
-These tools solve different problems at different layers of the stack. `climval` is intentionally scoped to be the layer you can `import` in three lines.
-
----
+climval is scoped to be the layer you can `import` in three lines.
 
 ## References
 
@@ -347,15 +308,13 @@ These tools solve different problems at different layers of the stack. `climval`
   https://doi.org/10.1029/2007JD008972
 
 - Taylor, K. E. (2001). Summarizing multiple aspects of model performance in a single
-  diagram. *Journal of Geophysical Research*, 106(D7), 7183–7192.
+  diagram. *Journal of Geophysical Research*, 106(D7), 7183-7192.
   https://doi.org/10.1029/2000JD900719
 
 - Gupta, H. V., Kling, H., Yilmaz, K. K., & Martinez, G. F. (2009). Decomposition
   of the mean squared error and NSE: Implications for improving hydrological modelling.
-  *Journal of Hydrology*, 377(1–2), 80–91.
+  *Journal of Hydrology*, 377(1-2), 80-91.
   https://doi.org/10.1016/j.jhydrol.2009.08.003
-
----
 
 ## Contributing
 
@@ -368,12 +327,8 @@ pip install -e ".[dev]"
 pytest && ruff check . && mypy climval/
 ```
 
----
+## Licence
 
-## License
+climval is licensed under the [Apache License 2.0](LICENSE).
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
-
----
-
-*Built by [Northflow Technologies](https://northflow.no) — open-source AI-native infrastructure for climate, space, and research.*
+Copyright 2026 Northflow Technologies AS

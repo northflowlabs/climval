@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "climval"
 version = "0.1.1"
 description = "Climate model validation and benchmarking framework"
-authors = [{ name = "Northflow Technologies", email = "hello@northflow.no" }]
+authors = [{ name = "Northflow Technologies AS", email = "hello@northflow.no" }]
 license = { text = "Apache-2.0" }
 readme = "README.md"
 requires-python = ">=3.10"
@@ -56,10 +56,11 @@ all = [
 climval = "climval.cli:main"
 
 [project.urls]
-Homepage    = "https://github.com/northflow-technologies/climval"
-Issues      = "https://github.com/northflow-technologies/climval/issues"
-Changelog   = "https://github.com/northflow-technologies/climval/blob/main/CHANGELOG.md"
-Organisation = "https://northflow.tech"
+Homepage    = "https://research.northflow.no/systems/climval"
+Repository  = "https://github.com/northflowlabs/climval"
+Issues      = "https://github.com/northflowlabs/climval/issues"
+Changelog   = "https://github.com/northflowlabs/climval/blob/main/CHANGELOG.md"
+Organisation = "https://northflow.no"
 
 [tool.setuptools.packages.find]
 where = ["."]
