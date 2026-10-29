@@ -48,7 +48,7 @@ suite.register(era5, role="reference")
 suite.register(mpi)
 suite.register(cordex)
 
-# Add extra metrics (optional — defaults already include RMSE, MAE, bias, r, TSS)
+# Add extra metrics (optional: defaults already include RMSE, MAE, bias, r, TSS)
 suite.add_metric(PercentileBias(percentile=99.0))
 
 # ── 3. Run ────────────────────────────────────────────────────────────────────

@@ -31,7 +31,7 @@ class TemporalResolution(str, Enum):
 
 class SpatialResolution(str, Enum):
     HIGH = "high"       # < 10 km
-    MEDIUM = "medium"   # 10–50 km
+    MEDIUM = "medium"   # 10 to 50 km
     LOW = "low"         # > 50 km
     GLOBAL = "global"
 
@@ -50,8 +50,8 @@ class SpatialDomain:
 
     def __str__(self) -> str:
         return (
-            f"[{self.lat_min:.2f}°N–{self.lat_max:.2f}°N, "
-            f"{self.lon_min:.2f}°E–{self.lon_max:.2f}°E]"
+            f"[{self.lat_min:.2f}°N to {self.lat_max:.2f}°N, "
+            f"{self.lon_min:.2f}°E to {self.lon_max:.2f}°E]"
         )
 
 

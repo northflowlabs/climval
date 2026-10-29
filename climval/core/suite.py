@@ -1,7 +1,7 @@
 """
 climval.core.suite
 =============================
-BenchmarkSuite — the central orchestrator for comparing climate models.
+BenchmarkSuite: the central orchestrator for comparing climate models.
 
 Usage
 -----
@@ -184,7 +184,7 @@ class BenchmarkSuite:
             missing = set(variables) - shared
             if missing:
                 logger.warning(
-                    "Variables %s not present in both models — skipping.", missing
+                    "Variables %s not present in both models: skipping.", missing
                 )
         else:
             target_vars = shared

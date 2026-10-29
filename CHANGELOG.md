@@ -7,11 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.0] — 2026-02-21
+## [0.1.1] - Unreleased
+
+### Changed
+- Project metadata: author Northflow Technologies AS, contact hello@northflow.no,
+  homepage https://research.northflow.no/systems/climval, repository under github.com/northflowlabs
+- The `all` extra lists its dependencies explicitly
+- `__version__` matches the package version
+
+## [0.1.0] - 2026-02-21
 
 ### Added
-- `BenchmarkSuite` — composable orchestrator for multi-model validation
-- `load_model()` — unified loader with presets for ERA5, ERA5-Land, CMIP6, CORDEX
+- `BenchmarkSuite`: composable orchestrator for multi-model validation
+- `load_model()`: unified loader with presets for ERA5, ERA5-Land, CMIP6, CORDEX
 - Metric library: RMSE, MAE, Mean Bias, NRMSE, Pearson r, Spearman r,
   Taylor Skill Score (Taylor 2001), Percentile Bias P5/P95 (Gleckler et al. 2008)
 - Typed data models: `ClimateModel`, `ClimateVariable`, `SpatialDomain`,

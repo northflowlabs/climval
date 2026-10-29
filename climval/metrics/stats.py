@@ -10,7 +10,7 @@ References:
 - Gleckler et al. (2008): Performance metrics for climate models.
   J. Geophys. Res., 113, D06104.
 - Taylor (2001): Summarizing multiple aspects of model performance
-  in a single diagram. J. Geophys. Res., 106, 7183–7192.
+  in a single diagram. J. Geophys. Res., 106, 7183-7192.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class BaseMetric:
 # ---------------------------------------------------------------------------
 
 class RMSE(BaseMetric):
-    """Root Mean Square Error — measures average magnitude of error."""
+    """Root Mean Square Error: measures average magnitude of error."""
 
     name = "rmse"
     higher_is_better = False
@@ -64,7 +64,7 @@ class RMSE(BaseMetric):
 
 
 class MAE(BaseMetric):
-    """Mean Absolute Error — robust to outliers."""
+    """Mean Absolute Error: robust to outliers."""
 
     name = "mae"
     higher_is_better = False
@@ -83,7 +83,7 @@ class MAE(BaseMetric):
 
 
 class MeanBias(BaseMetric):
-    """Mean Bias — systematic over/under-estimation."""
+    """Mean Bias: systematic over/under-estimation."""
 
     name = "mean_bias"
     higher_is_better = False
@@ -102,7 +102,7 @@ class MeanBias(BaseMetric):
 
 
 class NormalizedRMSE(BaseMetric):
-    """Normalized RMSE (NRMSE) — RMSE normalized by observed std dev.
+    """Normalized RMSE (NRMSE): RMSE normalized by observed std dev.
 
     Values < 1 indicate the model error is smaller than natural variability.
     """
@@ -128,7 +128,7 @@ class NormalizedRMSE(BaseMetric):
 # ---------------------------------------------------------------------------
 
 class PearsonCorrelation(BaseMetric):
-    """Pearson correlation coefficient — linear agreement."""
+    """Pearson correlation coefficient: linear agreement."""
 
     name = "pearson_r"
     higher_is_better = True
@@ -159,7 +159,7 @@ class PearsonCorrelation(BaseMetric):
 
 
 class SpearmanCorrelation(BaseMetric):
-    """Spearman rank correlation — monotonic agreement, robust to outliers."""
+    """Spearman rank correlation: monotonic agreement, robust to outliers."""
 
     name = "spearman_r"
     higher_is_better = True
@@ -180,12 +180,12 @@ class SpearmanCorrelation(BaseMetric):
 # ---------------------------------------------------------------------------
 
 class TaylorSkillScore(BaseMetric):
-    """Taylor Skill Score (TSS) — combines correlation and variance ratio.
+    """Taylor Skill Score (TSS): combines correlation and variance ratio.
 
     TSS = 4(1+R)^4 / [(σ_f/σ_o + σ_o/σ_f)^2 * (1+R_0)^4]
     where R_0 is the maximum attainable correlation.
 
-    Reference: Taylor (2001), J. Geophys. Res., 106, 7183–7192.
+    Reference: Taylor (2001), J. Geophys. Res., 106, 7183-7192.
     """
 
     name = "taylor_skill_score"
@@ -214,7 +214,7 @@ class TaylorSkillScore(BaseMetric):
 
 
 class PercentileBias(BaseMetric):
-    """Percentile bias — bias at a specific quantile (e.g. extremes).
+    """Percentile bias: bias at a specific quantile (e.g. extremes).
 
     Useful for assessing model skill in capturing tail events.
     """

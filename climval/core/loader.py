@@ -33,7 +33,7 @@ _PRESETS: dict[str, dict[str, Any]] = {
         "model_type": ModelType.REANALYSIS,
         "spatial_resolution": SpatialResolution.HIGH,
         "temporal_resolution": TemporalResolution.HOURLY,
-        "description": "ECMWF ERA5 Global Reanalysis (1940–present)",
+        "description": "ECMWF ERA5 Global Reanalysis (1940 to present)",
     },
     "era5-land": {
         "model_type": ModelType.REANALYSIS,

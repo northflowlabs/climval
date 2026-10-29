@@ -1,5 +1,5 @@
 """
-climval — Climate Model Validation Framework
+climval: Climate Model Validation Framework
 =============================================
 An open, composable benchmarking framework for comparing climate model outputs.
 
@@ -28,8 +28,8 @@ References
 - Taylor (2001), J. Geophys. Res., 106, 7183-7192
 """
 
-__version__ = "0.1.0"
-__author__ = "Northflow Technologies"
+__version__ = "0.1.1"
+__author__ = "Northflow Technologies AS"
 __license__ = "Apache-2.0"
 
 from climval.core.loader import load_model
