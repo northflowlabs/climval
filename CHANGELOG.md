@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.1] - Unreleased
+## [0.1.1] - 2026-10-29
 
 ### Changed
 - `BenchmarkSuite.run()` emits a `UserWarning` when it falls back to synthetic
