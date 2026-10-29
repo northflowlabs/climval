@@ -382,3 +382,40 @@ class TestBenchmarkSuite:
         v2 = r2.results[0].score_summary()
         for key in v1:
             assert v1[key] == pytest.approx(v2[key])
+
+
+class TestSyntheticFallback:
+    def test_run_without_files_warns(
+        self, reference_model: ClimateModel, candidate_model: ClimateModel
+    ) -> None:
+        suite = BenchmarkSuite()
+        suite.register(reference_model, role="reference")
+        suite.register(candidate_model)
+        with pytest.warns(UserWarning, match="synthetic random data"):
+            report = suite.run(n_samples=50)
+        assert report.synthetic is True
+        assert all(r.synthetic for r in report.results)
+        assert "not a validation" in report.results[0].notes
+
+    def test_synthetic_flag_in_exports(
+        self,
+        reference_model: ClimateModel,
+        candidate_model: ClimateModel,
+        tmp_path,
+    ) -> None:
+        suite = BenchmarkSuite()
+        suite.register(reference_model, role="reference")
+        suite.register(candidate_model)
+        with pytest.warns(UserWarning):
+            report = suite.run(n_samples=50)
+        d = report.to_dict()
+        assert d["synthetic_data"] is True
+        assert d["results"][0]["synthetic"] is True
+        out = tmp_path / "report.md"
+        report.export(str(out))
+        assert "Synthetic data" in out.read_text(encoding="utf-8")
+
+    def test_result_default_not_synthetic(self) -> None:
+        from climval.models.schema import BenchmarkResult
+
+        assert BenchmarkResult(reference="a", candidate="b").synthetic is False

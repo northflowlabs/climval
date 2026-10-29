@@ -15,6 +15,7 @@ Usage
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,12 @@ if TYPE_CHECKING:
     from climval.core.report import BenchmarkReport
 
 logger = logging.getLogger(__name__)
+
+SYNTHETIC_DATA_NOTE = (
+    "Scores computed on synthetic random data, not on model output. "
+    "They are not a validation. Load data files (source_path on both "
+    "models) to validate real models."
+)
 
 
 class BenchmarkSuite:
@@ -118,7 +125,8 @@ class BenchmarkSuite:
 
         When real data files are loaded (NetCDF/CSV), actual arrays are used.
         In the absence of data files, synthetic arrays are generated for
-        structural validation and CI use.
+        structural validation and CI use. In that case a ``UserWarning`` is
+        emitted and each affected ``BenchmarkResult`` has ``synthetic=True``.
 
         Parameters
         ----------
@@ -158,6 +166,15 @@ class BenchmarkSuite:
             )
             results.append(result)
 
+        synthetic = [r.candidate for r in results if r.synthetic]
+        if synthetic:
+            warnings.warn(
+                f"{SYNTHETIC_DATA_NOTE} Affected candidates: "
+                f"{', '.join(synthetic)}.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         from climval.core.report import BenchmarkReport as _BenchmarkReport
         return _BenchmarkReport(
             suite_name=self.name,
@@ -190,6 +207,7 @@ class BenchmarkSuite:
             target_vars = shared
 
         metric_results: list[MetricResult] = []
+        synthetic = not (reference.source_path and candidate.source_path)
 
         for var_name in sorted(target_vars):
             ref_data, can_data = self._get_arrays(
@@ -222,6 +240,8 @@ class BenchmarkSuite:
             reference=reference.name,
             candidate=candidate.name,
             metrics=metric_results,
+            notes=SYNTHETIC_DATA_NOTE if synthetic and target_vars else "",
+            synthetic=bool(synthetic and target_vars),
         )
 
     def _get_arrays(

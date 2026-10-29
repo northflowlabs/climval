@@ -172,6 +172,8 @@ class BenchmarkResult:
     computed_at: datetime = field(default_factory=datetime.utcnow)
     passed: bool | None = None
     notes: str = ""
+    synthetic: bool = False
+    """True when the scores were computed on synthetic random arrays."""
 
     def score_summary(self) -> dict[str, float]:
         return {m.metric_name: m.value for m in self.metrics}

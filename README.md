@@ -20,7 +20,7 @@ Every lab compares climate models with its own scripts for RMSE, bias and Taylor
 - **Typed data models:** CF-convention variable definitions, spatial and temporal domain objects, and structured `ValidationResult` schemas
 - **Presets:** ERA5, ERA5-Land, CMIP6-MPI, CMIP6-HadGEM and CORDEX-EUR
 - **NetCDF, CSV and Zarr:** read through `xarray` when real files are provided
-- **Synthetic fallback:** structural validation and CI without data files
+- **Synthetic fallback:** structural validation and CI without data files. Runs on synthetic data emit a `UserWarning` and are flagged in the report; those scores are not a validation
 - **Export:** HTML report, JSON and Markdown
 - **CLI:** run comparisons from the terminal
 - **Extensible:** add your own metrics, variables and loaders

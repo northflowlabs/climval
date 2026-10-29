@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.1] - Unreleased
 
 ### Changed
+- `BenchmarkSuite.run()` emits a `UserWarning` when it falls back to synthetic
+  random arrays because no data files are loaded. The scores in that case are
+  not a validation. Each affected `BenchmarkResult` has `synthetic=True` and a
+  note in `notes`; `BenchmarkReport.synthetic` is True, and the JSON, HTML,
+  Markdown and console output say so
 - Project metadata: author Northflow Technologies AS, contact hello@northflow.no,
   homepage https://research.northflow.no/systems/climval, repository under github.com/northflowlabs
 - The `all` extra lists its dependencies explicitly

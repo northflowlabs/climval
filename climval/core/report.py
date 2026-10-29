@@ -47,6 +47,19 @@ class BenchmarkReport:
         self.metrics_used = metrics_used
         self.generated_at: datetime = datetime.utcnow()
 
+    @property
+    def synthetic(self) -> bool:
+        """True when any result was computed on synthetic random data."""
+        return any(r.synthetic for r in self.results)
+
+    def _synthetic_notice(self) -> str:
+        names = ", ".join(r.candidate for r in self.results if r.synthetic)
+        return (
+            "Synthetic data: scores for "
+            f"{names} were computed on random arrays, not on model output. "
+            "They are not a validation."
+        )
+
     # ------------------------------------------------------------------
     # Serialization
     # ------------------------------------------------------------------
@@ -57,11 +70,14 @@ class BenchmarkReport:
             "generated_at": self.generated_at.isoformat(),
             "reference_model": self.reference.name,
             "candidate_models": [c.name for c in self.candidates],
+            "synthetic_data": self.synthetic,
             "results": [
                 {
                     "reference": r.reference,
                     "candidate": r.candidate,
                     "computed_at": r.computed_at.isoformat(),
+                    "synthetic": r.synthetic,
+                    "notes": r.notes,
                     "metrics": [
                         {
                             "metric": m.metric_name,
@@ -114,6 +130,8 @@ class BenchmarkReport:
             f"**Candidates:** {', '.join(c.name for c in self.candidates)}",
             "",
         ]
+        if self.synthetic:
+            lines.extend([f"> **{self._synthetic_notice()}**", ""])
         for result in self.results:
             lines.append(f"## {result.candidate} vs {result.reference}")
             lines.append("")
@@ -144,6 +162,11 @@ class BenchmarkReport:
                     f"<td>{m.units}</td>"
                     f"</tr>\n"
                 )
+        notice_html = (
+            f'<p class="notice">{self._synthetic_notice()}</p>\n'
+            if self.synthetic
+            else ""
+        )
 
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -180,6 +203,8 @@ class BenchmarkReport:
   .badge {{ display: inline-block; padding: 2px 8px; border-radius: 4px;
             font-size: 11px; background: var(--surface);
             border: 1px solid var(--border); color: var(--muted); }}
+  .notice {{ margin-bottom: 24px; padding: 12px 14px; color: #f0b429;
+             border: 1px solid #f0b429; border-radius: 4px; }}
   footer {{ margin-top: 40px; color: var(--muted); font-size: 11px; }}
 </style>
 </head>
@@ -193,7 +218,7 @@ class BenchmarkReport:
         f'<span class="badge">{c.name}</span>' for c in self.candidates)}
   </div>
 </header>
-<table>
+{notice_html}<table>
   <thead>
     <tr>
       <th>Candidate</th><th>Variable</th><th>Metric</th>
@@ -218,6 +243,8 @@ class BenchmarkReport:
         print(f"  Reference : {self.reference.name}")
         print(f"  Generated : {self.generated_at.strftime('%Y-%m-%d %H:%M UTC')}")
         print(f"{'═' * 72}\n")
+        if self.synthetic:
+            print(f"  WARNING: {self._synthetic_notice()}\n")
 
         for result in self.results:
             print(f"  ▸ Candidate: {result.candidate}")
