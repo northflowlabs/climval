@@ -50,7 +50,9 @@ class TestDifferentGridsAndCalendars:
         m = m.isel(time=[keys_can.index(k) for k in common]).assign_coords(time=r["time"])
         valid = r.notnull() & m.notnull()
         r, m = r.where(valid), m.where(valid)
-        w = np.cos(np.deg2rad(r["lat"])).broadcast_like(r)
+        # cell area on a uniform grid is proportional to cos(lat); each month
+        # counts by its length in days
+        w = (np.cos(np.deg2rad(r["lat"])) * r["time"].dt.days_in_month).broadcast_like(r)
 
         dims = ["time", "lat", "lon"]
         expected = {
@@ -79,7 +81,7 @@ class TestDifferentGridsAndCalendars:
 
 class TestComparison:
     def test_samples_and_groups(self, ref_grid: xr.DataArray) -> None:
-        can = ref_grid + 1.0
+        can = (ref_grid + 1.0).assign_attrs(ref_grid.attrs)
         res = climval.compare(ref_grid, can, by="season", samples=list(SAMPLES))
         assert res.groups == ["all", "DJF", "MAM", "JJA", "SON"]
         for g in res.groups:
@@ -95,13 +97,14 @@ class TestComparison:
 
     def test_climatology_differs_from_space_time(self, ref_grid: xr.DataArray) -> None:
         rng = np.random.default_rng(0)
-        can = ref_grid + rng.normal(0, 1, ref_grid.shape)
+        can = (ref_grid + rng.normal(0, 1, ref_grid.shape)).assign_attrs(ref_grid.attrs)
         res = climval.compare(ref_grid, can)
         # time-averaging removes most noise from the pattern
         assert res.value("rmse", "climatology") < 0.5 * res.value("rmse", "space_time")
 
     def test_outputs(self, ref_grid: xr.DataArray, tmp_path: object) -> None:
-        res = climval.compare(ref_grid, ref_grid + 0.5, names=("ref", "cand"))
+        other = (ref_grid + 0.5).assign_attrs(ref_grid.attrs)
+        res = climval.compare(ref_grid, other, names=("ref", "cand"))
         frame = res.to_dataframe()
         assert {"sample", "group", "metric", "value", "units"} <= set(frame.columns)
         d = json.loads(res.to_json())
@@ -163,6 +166,7 @@ class TestComparison:
 
     def test_ensemble_member_dimension(self, ref_grid: xr.DataArray) -> None:
         members = xr.concat([ref_grid + 1, ref_grid + 2], dim=pd.Index(["r1", "r2"], name="member"))
+        members = members.assign_attrs(ref_grid.attrs)
         res = climval.compare(ref_grid, members, metrics=["mean_bias", "rmse"])
         frame = res.to_dataframe()
         bias = frame[(frame.metric == "mean_bias") & (frame["sample"] == "space_time")]
@@ -170,7 +174,7 @@ class TestComparison:
         assert values == pytest.approx({"r1": 1.0, "r2": 2.0})
 
     def test_thresholds(self, ref_grid: xr.DataArray) -> None:
-        res = climval.compare(ref_grid, ref_grid + 0.5, by="season")
+        res = climval.compare(ref_grid, (ref_grid + 0.5).assign_attrs(ref_grid.attrs), by="season")
         ok = res.check({"mean_bias": {"abs_max": 1.0}, "pearson_r": {"min": 0.99, "group": "*"}})
         assert ok.passed and len(ok.checks) == 6
         bad = climval.evaluate_thresholds(res, {"rmse": {"max": 0.1, "sample": "climatology"}})
@@ -225,9 +229,10 @@ class TestFiles:
 
 class TestAccessor:
     def test_dataarray_and_dataset(self, ref_grid: xr.DataArray) -> None:
-        res = (ref_grid + 1).climval.compare(ref_grid)
+        res = (ref_grid + 1).assign_attrs(ref_grid.attrs).climval.compare(ref_grid)
         assert res["mean_bias"] == pytest.approx(1.0)
-        res2 = xr.Dataset({"tas": ref_grid - 1}).climval.compare(ref_grid, "tas")
+        minus = (ref_grid - 1).assign_attrs(ref_grid.attrs)
+        res2 = xr.Dataset({"tas": minus}).climval.compare(ref_grid, "tas")
         assert res2["mean_bias"] == pytest.approx(-1.0)
 
 

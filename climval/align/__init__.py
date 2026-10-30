@@ -2,22 +2,29 @@
 
 :func:`align` runs these steps in order and records each one:
 
-1. ``inputs``: resolve DataArray, Dataset, path or URL lazily.
+1. ``inputs``: resolve DataArray, Dataset, path or URL (lazily, except CSV).
 2. ``coordinates``: find lat, lon and time (CF aware), rename them, sort
-   latitude ascending, detect curvilinear grids.
-3. ``longitude``: express both inputs in one longitude frame (the target
+   latitude ascending, detect curvilinear grids and station data.
+3. ``target_grid``: by default the coarser of the two grids; station
+   locations are always the target when one input is station data.
+4. ``longitude``: express both inputs in one longitude frame (the target
    grid's convention, or a frame that keeps the region contiguous).
-4. ``region``: cut the box (crossing the antimeridian if asked). The target
+5. ``region``: cut the box (crossing the antimeridian if asked). The target
    grid is cut exactly; the grid that will be regridded keeps a margin of
-   one cell and, when global, a wrapped column at each end, so
-   interpolation at the edges has neighbours.
-5. ``time``: period, common frequency, aggregation and period matching
-   across calendars (see :mod:`climval.align.temporal`).
-6. ``regrid``: interpolate or remap onto the target grid.
-7. ``region_mask``: apply a regionmask polygon on the target grid.
-8. ``units``: convert the candidate into the reference's units.
-9. ``missing``: paired mask; a point counts only where both are valid.
-10. ``weights``: cell area or cos(latitude).
+   one cell and, for bilinear and nearest on a global grid, a wrapped column
+   at each end, so interpolation at the edges has neighbours. Conservative
+   remapping gets no wrapped columns; xESMF treats a global source as
+   periodic instead.
+6. ``time``: native frequencies (time bounds, frequency attribute or time
+   steps), period, common frequency, aggregation with a coverage threshold
+   and period matching across calendars (see :mod:`climval.align.temporal`).
+7. ``regrid``: interpolate or remap onto the target grid, or sample the grid
+   at station locations.
+8. ``region_mask``: apply a regionmask polygon on the target grid.
+9. ``units``: convert the candidate into the reference's units.
+10. ``missing``: paired mask; a point counts only where both are valid.
+11. ``weights``: cell area (given, or computed from cell bounds), cos(latitude)
+    on request, or uniform for station data.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ from climval.align.coords import (
     normalise_coords,
     pad_periodic,
     spacing,
+    stations_to_lon_frame,
     to_lon_frame,
 )
 from climval.align.inputs import InputLike, ResolvedInput, resolve_input
@@ -49,7 +57,7 @@ from climval.align.region import (
 )
 from climval.align.regrid import METHODS
 from climval.align.regrid import regrid as _regrid
-from climval.align.temporal import align_time
+from climval.align.temporal import DEFAULT_MIN_COVERAGE, align_time, time_weights
 from climval.align.units import harmonise_units
 from climval.align.weights import make_weights
 from climval.errors import AlignmentError, CurvilinearGridError
@@ -80,6 +88,8 @@ class AlignedPair:
     has_time: bool
     frequency: str | None = None
     options: dict[str, Any] = field(default_factory=dict)
+    time_weights: xr.DataArray | None = None
+    """Length in days of the period each time step stands for (monthly and yearly data)."""
 
     @property
     def valid(self) -> xr.DataArray:
@@ -112,6 +122,10 @@ def _cell_size(da: xr.DataArray) -> float:
 def _target_role(
     target: Any, ref: xr.DataArray, can: xr.DataArray, rg: GridInfo, cg: GridInfo
 ) -> str:
+    if rg.kind == "station" or cg.kind == "station":
+        if isinstance(target, (xr.DataArray, xr.Dataset)):
+            raise AlignmentError("Station data are compared at the stations; drop target=")
+        return "reference" if rg.kind == "station" else "candidate"
     if isinstance(target, (xr.DataArray, xr.Dataset)):
         return "custom"
     if target in ("reference", "candidate"):
@@ -151,9 +165,10 @@ def align(
     region: RegionLike = None,
     period: tuple[Any, Any] | None = None,
     regrid: str = "bilinear",
-    target: str | xr.DataArray | xr.Dataset = "reference",
+    target: str | xr.DataArray | xr.Dataset = "coarser",
     time: str = "intersect",
     freq: str | None = None,
+    min_coverage: float = DEFAULT_MIN_COVERAGE,
     units: str | Mapping[str, str] = "convert",
     weights: str | xr.DataArray | None = "area",
     area: xr.DataArray | None = None,
@@ -180,6 +195,9 @@ def align(
     # 2. coordinates
     ref, rg = normalise_coords(r_in.data, "reference")
     can, cg = normalise_coords(c_in.data, "candidate")
+    # Some xarray versions and xESMF drop attributes in reductions and
+    # remapping; the variables' own attributes (units) are put back below.
+    attrs = {"reference": dict(ref.attrs), "candidate": dict(can.attrs)}
     steps.append({"step": "coordinates", "reference": rg.record(), "candidate": cg.record()})
 
     role = _target_role(target, ref, can, rg, cg)
@@ -193,7 +211,13 @@ def align(
 
     grids = {"reference": rg, "candidate": cg}
     sources = {"reference": role != "reference", "candidate": role != "candidate"}
+    stations = rg.kind == "station" or cg.kind == "station"
     for name, g in grids.items():
+        if stations and g.kind == "curvilinear":
+            raise CurvilinearGridError(
+                "Station data can be compared with rectilinear grids only; "
+                f"the {name} grid is curvilinear"
+            )
         if g.kind != "curvilinear":
             continue
         if not sources[name]:
@@ -210,9 +234,17 @@ def align(
                 "regrid='conservative', which remaps curvilinear grids through "
                 "xESMF (conda install -c conda-forge xesmf)."
             )
-    steps.append(
-        {"step": "target_grid", "target": role, "regridded": [k for k, v in sources.items() if v]}
-    )
+    if rg.kind == "station" and cg.kind == "station":
+        sources = {"reference": False, "candidate": False}
+    tg_rec: dict[str, Any] = {
+        "step": "target_grid",
+        "target": role,
+        "requested": target if isinstance(target, str) else "user grid",
+        "regridded": [k for k, v in sources.items() if v],
+    }
+    if stations:
+        tg_rec["stations"] = "the station locations are the target; a grid is sampled there"
+    steps.append(tg_rec)
 
     # 3. longitude frame
     box_or_mask = as_region(region)
@@ -220,7 +252,7 @@ def align(
     box = mask_region.box() if mask_region is not None else box_or_mask
     assert box is None or isinstance(box, Box)
     tgt_da = custom if custom is not None else (ref if role == "reference" else can)
-    tgt_lon = tgt_da["lon"].values if "lon" in tgt_da.dims else None
+    tgt_lon: np.ndarray | None = tgt_da["lon"].values if "lon" in tgt_da.dims else None
     frame = choose_lon_frame(box, tgt_lon)
     lon_rec: dict[str, Any] = {"step": "longitude", "frame": [frame, frame + 360.0]}
     arrays = {"reference": ref, "candidate": can}
@@ -229,6 +261,11 @@ def align(
         if grids[name].kind == "rectilinear" and "lon" in da.dims:
             before = lon_convention(da["lon"].values)
             da, changed = to_lon_frame(da, frame)
+            lon_rec[name] = f"{before} {'re-expressed in frame' if changed else 'unchanged'}"
+            arrays[name] = da
+        elif grids[name].kind == "station":
+            before = lon_convention(da["lon"].values)
+            da, changed = stations_to_lon_frame(da, frame)
             lon_rec[name] = f"{before} {'re-expressed in frame' if changed else 'unchanged'}"
             arrays[name] = da
     if custom is not None and "lon" in custom.dims:
@@ -240,11 +277,28 @@ def align(
     reg_rec["region"] = (
         mask_region.to_dict() if mask_region is not None else box.to_dict() if box else None
     )
+    if mask_region is not None and stations:
+        raise AlignmentError(
+            "regionmask regions are not supported with station data; use climval.Box"
+        )
+    interpolates = regrid in ("bilinear", "nearest") or stations
     for name in arrays:
         da = arrays[name]
+        if grids[name].kind == "station":
+            if box is not None:
+                da = _stations_in_box(da, box, frame, name)
+                reg_rec[f"{name}_stations"] = int(da.sizes["station"])
+            arrays[name] = da
+            continue
         if grids[name].kind != "rectilinear":
             continue
-        if sources[name] and "lon" in da.dims and is_global_lon(da["lon"].values):
+        if (
+            sources[name]
+            and interpolates
+            and "lon" in da.dims
+            and is_global_lon(da["lon"].values)
+            and not _same_axis(da["lon"].values, tgt_lon)
+        ):
             da = pad_periodic(da)
             reg_rec[f"{name}_padded"] = "global longitude: one wrapped column added at each end"
         if box is not None:
@@ -268,7 +322,20 @@ def align(
     ref, can = arrays["reference"], arrays["candidate"]
 
     # 5. time
-    ref, can, time_rec = align_time(ref, can, freq=freq, period=period, mode=time)
+    ref, can, time_rec = align_time(
+        ref,
+        can,
+        freq=freq,
+        period=period,
+        mode=time,
+        min_coverage=min_coverage,
+        bounds={
+            "reference": _time_bounds(r_in.bounds.get("time"), ref),
+            "candidate": _time_bounds(c_in.bounds.get("time"), can),
+        },
+        declared={"reference": r_in.frequency, "candidate": c_in.frequency},
+    )
+    target_freq = time_rec.pop("target_freq", None)
     steps.append(time_rec)
 
     # 6. regrid
@@ -276,14 +343,35 @@ def align(
         tgt_da = custom
     else:
         tgt_da = ref if role == "reference" else can
-    tgt_lat = tgt_da["lat"].values if "lat" in tgt_da.dims else None
-    tgt_lon = tgt_da["lon"].values if "lon" in tgt_da.dims else None
-    if sources["candidate"]:
-        can, rec = _regrid(can, tgt_lat, tgt_lon, regrid, "candidate", cg.kind)
+    tgt_lat: np.ndarray | None
+    if stations:
+        tgt_lat = np.asarray(tgt_da["lat"].values)
+        tgt_lon = np.asarray(tgt_da["lon"].values)
+    else:
+        tgt_lat = tgt_da["lat"].values if "lat" in tgt_da.dims else None
+        tgt_lon = tgt_da["lon"].values if "lon" in tgt_da.dims else None
+    for name in ("candidate", "reference"):
+        if not sources[name]:
+            continue
+        src = can if name == "candidate" else ref
+        periodic = "lon" in src.dims and is_global_lon(src["lon"].values)
+        src, rec = _regrid(
+            src,
+            tgt_lat,
+            tgt_lon,
+            regrid,
+            name,
+            grids[name].kind,
+            periodic=periodic,
+            points=stations,
+        )
         steps.append(rec)
-    if sources["reference"]:
-        ref, rec = _regrid(ref, tgt_lat, tgt_lon, regrid, "reference", rg.kind)
-        steps.append(rec)
+        if name == "candidate":
+            can = src
+        else:
+            ref = src
+    if rg.kind == "station" and cg.kind == "station":
+        _check_same_stations(ref, can)
 
     # 7. regionmask polygon
     if mask_region is not None:
@@ -299,12 +387,22 @@ def align(
     # Drop auxiliary coordinates so arithmetic aligns on index coordinates only.
     ref = ref.reset_coords(drop=True)
     can = can.reset_coords(drop=True)
-    for d in HORIZONTAL:
+    for d in (*HORIZONTAL, "station"):
         if d in ref.dims and d in can.dims:
             if ref.sizes[d] != can.sizes[d]:
                 raise AlignmentError(f"After regridding, {d} sizes differ; this is a climval bug")
-            can = can.assign_coords({d: ref[d].values})
+            owner_da = ref if d in ref.coords else can if d in can.coords else None
+            if owner_da is not None:
+                values = owner_da[d].values
+                ref = ref.assign_coords({d: values})
+                can = can.assign_coords({d: values})
+    if stations:
+        site = {"lat": ("station", tgt_lat), "lon": ("station", tgt_lon)}
+        ref = ref.assign_coords(site)
+        can = can.assign_coords(site)
     _check_extra_dims(ref, can)
+    ref = ref.assign_attrs(attrs["reference"])
+    can = can.assign_attrs(attrs["candidate"])
 
     # 8. units
     ref, can, unit_rec = harmonise_units(ref, can, units)
@@ -324,12 +422,19 @@ def align(
     )
 
     # 10. weights
-    area_da = area if area is not None else (r_in.area if role == "reference" else None)
-    area_da = _prepare_area(area_da, frame, box)
-    w, w_rec = make_weights(weights, ref, area_da)
+    spatial = ("station",) if stations else tuple(d for d in HORIZONTAL if d in ref.dims)
+    owner = r_in if role == "reference" else c_in if role == "candidate" else None
+    area_da = area if area is not None else (owner.area if owner is not None else None)
+    area_da = None if stations else _prepare_area(area_da, frame, box)
+    grid_bounds = {} if owner is None or stations else _grid_bounds(owner.bounds)
+    w, w_rec = make_weights(weights, ref, area_da, grid_bounds, spatial)
+    tw = time_weights(ref, target_freq) if "time" in ref.dims else None
+    if tw is not None:
+        w_rec["time"] = (
+            "each time step weighted by the length of its period in days "
+            f"({time_rec.get('frequency')}, reference calendar)"
+        )
     steps.append(w_rec)
-
-    spatial = tuple(d for d in HORIZONTAL if d in ref.dims)
     return AlignedPair(
         reference=ref,
         candidate=can,
@@ -341,17 +446,65 @@ def align(
         spatial_dims=spatial,
         has_time="time" in ref.dims,
         frequency=time_rec.get("frequency"),
+        time_weights=tw,
         options={
             "regrid": regrid,
             "target": role,
             "time": time,
             "freq": freq,
+            "min_coverage": min_coverage,
             "period": list(period) if period is not None else None,
             "units": units if isinstance(units, str) else dict(units),
             "weights": weights if isinstance(weights, str) or weights is None else "user supplied",
             "region": reg_rec["region"],
         },
     )
+
+
+def _time_bounds(bounds: xr.DataArray | None, da: xr.DataArray) -> xr.DataArray | None:
+    """Time bounds renamed to ``time`` and put in the order of ``da``'s time steps."""
+    if bounds is None or "time" not in da.dims:
+        return None
+    b = bounds.rename({bounds.dims[0]: "time"}) if bounds.dims[0] != "time" else bounds
+    try:
+        out: xr.DataArray = b.sel(time=da["time"].values)
+    except (KeyError, ValueError, TypeError):
+        return None
+    return out
+
+
+def _grid_bounds(bounds: dict[str, xr.DataArray]) -> dict[str, xr.DataArray]:
+    out: dict[str, xr.DataArray] = {}
+    for axis in HORIZONTAL:
+        b = bounds.get(axis)
+        if b is not None:
+            out[axis] = b.rename({b.dims[0]: axis}) if b.dims[0] != axis else b
+    return out
+
+
+def _stations_in_box(da: xr.DataArray, box: Box, frame: float, role: str) -> xr.DataArray:
+    from climval.errors import NoOverlapError
+
+    lat = np.asarray(da["lat"].values, dtype=float)
+    keep = (lat >= box.lat[0] - 1e-9) & (lat <= box.lat[1] + 1e-9)
+    if box.subsets_lon:
+        lon = np.asarray(da["lon"].values, dtype=float)
+        west = frame + np.mod(box.west - frame, 360.0)
+        keep &= (lon >= west - 1e-9) & (lon <= west + box.lon_width + 1e-9)
+    if not keep.any():
+        raise NoOverlapError(f"The region {box.to_dict()} contains no station of the {role}")
+    out: xr.DataArray = da.isel(station=np.nonzero(keep)[0])
+    return out
+
+
+def _check_same_stations(ref: xr.DataArray, can: xr.DataArray) -> None:
+    for c in ("lat", "lon"):
+        a, b = np.asarray(ref[c].values, float), np.asarray(can[c].values, float)
+        if a.shape != b.shape or not np.allclose(a, b, atol=1e-6):
+            raise AlignmentError(
+                "Both inputs are station data but their stations differ; select the "
+                "same stations, in the same order, in both"
+            )
 
 
 def _grid_template(obj: xr.DataArray | xr.Dataset) -> xr.DataArray:
@@ -365,7 +518,7 @@ def _grid_template(obj: xr.DataArray | xr.Dataset) -> xr.DataArray:
 
 
 def _check_extra_dims(ref: xr.DataArray, can: xr.DataArray) -> None:
-    core = set(HORIZONTAL) | {"time"}
+    core = set(HORIZONTAL) | {"time", "station"}
     for d in set(ref.dims) & set(can.dims):
         if d in core:
             continue
@@ -376,3 +529,10 @@ def _check_extra_dims(ref: xr.DataArray, can: xr.DataArray) -> None:
                 f"Dimension {d!r} differs between reference and candidate; "
                 "select matching values first (for example .sel(plev=85000))"
             )
+
+
+def _same_axis(a: np.ndarray, b: np.ndarray | None) -> bool:
+    """True when two coordinate axes hold the same values (no regridding needed)."""
+    if b is None or np.size(a) != np.size(b):
+        return False
+    return bool(np.allclose(np.asarray(a, float), np.asarray(b, float), rtol=0, atol=1e-9))

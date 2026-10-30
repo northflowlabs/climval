@@ -99,12 +99,33 @@ def _squash(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
+# Spelled-out names are matched without regard to case ("Kelvin", "Percent").
+# Symbols are matched exactly, because case carries meaning there: "MB" is
+# not "mb", "mm" is not "Mm".
+_WORDS = {
+    "kelvin": "K",
+    "degree_kelvin": "K",
+    "celsius": "degC",
+    "degree_celsius": "degC",
+    "degrees_celsius": "degC",
+    "degrees celsius": "degC",
+    "fahrenheit": "degF",
+    "degree_fahrenheit": "degF",
+    "pascal": "Pa",
+    "millibar": "hPa",
+    "hectopascal": "hPa",
+    "kilopascal": "kPa",
+    "fraction": "1",
+    "dimensionless": "1",
+    "percent": "%",
+}
 _LOOKUP: dict[str, str] = {}
-_LOOKUP_LOWER: dict[str, str] = {}
 for _canon, _names in _ALIASES.items():
     for _n in _names:
         _LOOKUP[_squash(_n)] = _canon
-        _LOOKUP_LOWER.setdefault(_squash(_n).lower(), _canon)
+
+# Zero of the absolute scale in each temperature unit, for ratio-scale metrics.
+_ABSOLUTE_ZERO_OFFSET = {"K": 0.0, "degC": 273.15, "degF": 459.67}
 
 
 def canonical(units: str | None) -> str | None:
@@ -114,7 +135,37 @@ def canonical(units: str | None) -> str | None:
     key = _squash(str(units))
     if key in _LOOKUP:
         return _LOOKUP[key]
-    return _LOOKUP_LOWER.get(key.lower())
+    return _WORDS.get(key.lower())
+
+
+def absolute_offset(units: str | None) -> float:
+    """What to add to values in ``units`` so that zero is absolute zero.
+
+    273.15 for degC and 459.67 for degF (degF plus 459.67 is Rankine, whose
+    ratios equal those in K); 0 for every other unit, including units pint
+    does not know as temperatures.
+    """
+    canon = canonical(units)
+    if canon in _ABSOLUTE_ZERO_OFFSET:
+        return _ABSOLUTE_ZERO_OFFSET[canon]
+    if units is None or canon is not None:
+        return 0.0
+    try:
+        import pint
+
+        registry: Any
+        try:
+            from cf_xarray.units import units as registry
+        except Exception:  # noqa: BLE001
+            registry = pint.UnitRegistry()
+        unit = registry.Unit(str(units))
+        if unit.dimensionality != registry.Unit("K").dimensionality:
+            return 0.0
+        zero = registry.Quantity(0.0, unit).to("K").magnitude
+        scale = registry.Quantity(1.0, unit).to("K").magnitude - zero
+        return float(zero / scale) if scale else 0.0
+    except Exception:  # noqa: BLE001  pint missing or unit unknown
+        return 0.0
 
 
 def same_units(a: str, b: str) -> bool:

@@ -5,11 +5,20 @@
 * ``nearest``: xarray ``interp`` with nearest-neighbour selection.
 * ``conservative``: first-order conservative remapping through xESMF
   (``conservative_normed``), the only method that accepts curvilinear source
-  grids.
+  grids and the only one that averages a fine source over coarse target
+  cells. Global sources are remapped with ``periodic=True`` and without the
+  wrapped columns the interpolating methods use. Conservative remapping is
+  always done by xESMF, also when target and source points coincide.
 
-Target points outside the source grid become NaN; climval never extrapolates.
-When every target point already exists in the source grid, the points are
-selected directly and nothing is interpolated.
+A source cell reaches half a spacing beyond its centre, so target points
+within half a cell beyond the outermost source centre (clipped at the poles)
+take the edge value; points farther out become NaN, and climval never
+extrapolates beyond the source cells. For bilinear and nearest, when the
+target grid has the same spacing as the source and every target point is a
+source point, the points are selected directly and nothing is interpolated.
+
+Station data (paired latitude and longitude on a ``station`` dimension) are
+compared by sampling the grid at the station locations.
 """
 
 from __future__ import annotations
@@ -19,7 +28,7 @@ from typing import Any, Literal
 import numpy as np
 import xarray as xr
 
-from climval.align.coords import summarise_axis
+from climval.align.coords import spacing, summarise_axis
 from climval.errors import AlignmentError, MissingDependencyError
 
 METHODS = ("bilinear", "nearest", "conservative")
@@ -36,13 +45,6 @@ def _coincident(src: np.ndarray, tgt: np.ndarray) -> bool:
     right = src[np.minimum(pos, src.size - 1)]
     dist = np.minimum(np.abs(tgt - left), np.abs(tgt - right))
     return bool(np.all(dist <= tol))
-
-
-def _outside(src: np.ndarray, tgt: np.ndarray) -> int:
-    src = np.asarray(src, dtype=float)
-    tgt = np.asarray(tgt, dtype=float)
-    lo, hi = float(np.min(src)), float(np.max(src))
-    return int(np.sum((tgt < lo - 1e-9) | (tgt > hi + 1e-9)))
 
 
 def _in_gap(src: np.ndarray, tgt: np.ndarray) -> np.ndarray:
@@ -78,6 +80,39 @@ def bounds_1d(centres: np.ndarray, clip: tuple[float, float] | None = None) -> n
     return edges
 
 
+def _equal_spacing(src: np.ndarray, tgt: np.ndarray) -> bool:
+    s, t = spacing(np.sort(np.asarray(src, dtype=float))), spacing(np.asarray(tgt, dtype=float))
+    if not (np.isfinite(s) and np.isfinite(t)):
+        return np.size(tgt) <= 1 or np.size(src) <= 1
+    return bool(abs(s - t) <= 1e-6 * max(s, t))
+
+
+def _clamp(src: np.ndarray, tgt: np.ndarray, axis: str) -> tuple[np.ndarray, int, int]:
+    """Targets beyond the outermost source centre but inside its cell, moved onto that centre.
+
+    A source cell extends half a spacing beyond its centre (clipped at the
+    poles for latitude), so a target there lies inside the source grid and
+    takes the edge value. Returns the clamped targets, how many were moved and
+    how many lie beyond the half cell (those become NaN).
+    """
+    s = np.asarray(src, dtype=float)
+    t = np.asarray(tgt, dtype=float).copy()
+    if s.size == 0:
+        return t, 0, int(t.size)
+    lo, hi = float(np.min(s)), float(np.max(s))
+    half = 0.5 * spacing(np.sort(s)) if s.size > 1 else 0.0
+    edge_lo, edge_hi = lo - half, hi + half
+    if axis == "lat":
+        edge_lo, edge_hi = max(edge_lo, -90.0), min(edge_hi, 90.0)
+    eps = 1e-9 * max(1.0, abs(lo), abs(hi))
+    below = (t < lo) & (t >= edge_lo - eps)
+    above = (t > hi) & (t <= edge_hi + eps)
+    t[below] = lo
+    t[above] = hi
+    beyond = int(np.sum((t < lo - eps) | (t > hi + eps)))
+    return t, int(below.sum() + above.sum()), beyond
+
+
 def regrid(
     source: xr.DataArray,
     target_lat: np.ndarray | None,
@@ -85,8 +120,17 @@ def regrid(
     method: str,
     role: str,
     source_kind: str = "rectilinear",
+    *,
+    periodic: bool = False,
+    points: bool = False,
 ) -> tuple[xr.DataArray, dict[str, Any]]:
-    """Put ``source`` on the target latitude and longitude."""
+    """Put ``source`` on the target latitude and longitude.
+
+    ``points=True`` samples the source at the paired (lat[i], lon[i])
+    locations of station data instead of on a grid; the result has a
+    ``station`` dimension. ``periodic`` tells xESMF that the source wraps
+    around in longitude.
+    """
     if method not in METHODS:
         raise AlignmentError(f"Unknown regrid method {method!r}; use one of {METHODS}")
     target: dict[str, np.ndarray] = {}
@@ -99,53 +143,124 @@ def regrid(
         record["action"] = "none: no horizontal dimensions to regrid"
         return source, record
 
+    if points:
+        return _sample_points(source, target, method, record)
+
     record["target_grid"] = {d: summarise_axis(v) for d, v in target.items()}
 
     if source_kind == "curvilinear":
         if method != "conservative":
             raise AlignmentError("curvilinear sources need regrid='conservative'")
-        out = _xesmf(source, target, curvilinear=True)
+        out = _xesmf(source, target, curvilinear=True, periodic=False)
         record["action"] = "conservative remapping with xESMF (curvilinear source)"
         return out, record
 
     record["source_grid"] = {d: summarise_axis(source[d].values) for d in target}
-    outside = {d: _outside(source[d].values, v) for d, v in target.items()}
-    record["target_points_outside_source"] = outside
 
-    if all(_coincident(source[d].values, v) for d, v in target.items()):
+    if method == "conservative":
+        out = _xesmf(source, target, curvilinear=False, periodic=periodic)
+        record["periodic"] = periodic
+        record["action"] = "conservative remapping with xESMF (conservative_normed)"
+        return out, record
+
+    same = all(
+        _coincident(source[d].values, v) and _equal_spacing(source[d].values, v)
+        for d, v in target.items()
+    )
+    identical = all(
+        source[d].size == v.size and np.allclose(source[d].values, v, rtol=0, atol=1e-9)
+        for d, v in target.items()
+    )
+    if identical:
+        out = source.assign_coords({d: v for d, v in target.items()})
+        record["action"] = "grids identical: nothing interpolated"
+        return out, record
+    if same:
         out = source.sel({d: v for d, v in target.items()}, method="nearest")
         out = out.assign_coords({d: v for d, v in target.items()})
         record["action"] = "grids coincide: points selected, nothing interpolated"
         return out, record
 
-    if method in ("bilinear", "nearest"):
-        interp_method: Literal["linear", "nearest"] = (
-            "linear" if method == "bilinear" else "nearest"
+    coarser = [
+        d
+        for d, v in target.items()
+        if spacing(np.asarray(v, dtype=float)) > 1.5 * spacing(np.sort(source[d].values))
+    ]
+    if coarser:
+        record["note"] = (
+            f"the target grid is coarser than the source along {', '.join(coarser)}: "
+            f"{method} samples the source at the target points and does not average "
+            "over target cells; regrid='conservative' gives cell means"
         )
-        out = source.interp(
-            {d: v for d, v in target.items()},
-            method=interp_method,
-            assume_sorted=True,
-            kwargs={"fill_value": np.nan},
-        )
-        gaps = {d: _in_gap(source[d].values, v) for d, v in target.items()}
-        for d, in_gap in gaps.items():
-            if in_gap.any():
-                keep = xr.DataArray(~in_gap, dims=(d,), coords={d: target[d]})
-                out = out.where(keep)
-        record["target_points_in_source_gaps"] = {d: int(g.sum()) for d, g in gaps.items()}
-        record["action"] = (
-            f"{method} interpolation with xarray.interp; target points outside "
-            "the source grid or inside a gap of it set to NaN"
-        )
-        return out, record
 
-    out = _xesmf(source, target, curvilinear=False)
-    record["action"] = "conservative remapping with xESMF (conservative_normed)"
+    clamped: dict[str, np.ndarray] = {}
+    moved: dict[str, int] = {}
+    beyond: dict[str, int] = {}
+    for d, v in target.items():
+        clamped[d], moved[d], beyond[d] = _clamp(source[d].values, v, d)
+    record["target_points_outside_source"] = beyond
+    record["target_points_in_edge_half_cell"] = moved
+
+    interp_method: Literal["linear", "nearest"] = "linear" if method == "bilinear" else "nearest"
+    out = source.interp(
+        {d: v for d, v in clamped.items()},
+        method=interp_method,
+        assume_sorted=True,
+        kwargs={"fill_value": np.nan},
+    )
+    out = out.assign_coords({d: target[d] for d in clamped})
+    gaps = {d: _in_gap(source[d].values, clamped[d]) for d in clamped}
+    for d, in_gap in gaps.items():
+        if in_gap.any():
+            keep = xr.DataArray(~in_gap, dims=(d,), coords={d: target[d]})
+            out = out.where(keep)
+    record["target_points_in_source_gaps"] = {d: int(g.sum()) for d, g in gaps.items()}
+    record["action"] = (
+        f"{method} interpolation with xarray.interp; target points within half a source "
+        "cell beyond the outermost source centre take the edge value; points farther "
+        "out, or inside a gap of the source grid, are NaN"
+    )
     return out, record
 
 
-def _xesmf(source: xr.DataArray, target: dict[str, np.ndarray], curvilinear: bool) -> xr.DataArray:
+def _sample_points(
+    source: xr.DataArray, target: dict[str, np.ndarray], method: str, record: dict[str, Any]
+) -> tuple[xr.DataArray, dict[str, Any]]:
+    if method == "conservative":
+        raise AlignmentError(
+            "Station data are compared by sampling the grid at the station locations; "
+            "use regrid='bilinear' or 'nearest' (conservative remapping needs a target grid)"
+        )
+    n = len(next(iter(target.values())))
+    clamped: dict[str, np.ndarray] = {}
+    beyond: dict[str, int] = {}
+    for d, v in target.items():
+        clamped[d], _, beyond[d] = _clamp(source[d].values, v, d)
+    interp_method: Literal["linear", "nearest"] = "linear" if method == "bilinear" else "nearest"
+    out = source.interp(
+        {d: xr.DataArray(v, dims="station") for d, v in clamped.items()},
+        method=interp_method,
+        assume_sorted=True,
+        kwargs={"fill_value": np.nan},
+    )
+    out = out.drop_vars([d for d in clamped if d in out.coords])
+    keep = np.ones(n, dtype=bool)
+    for d in clamped:
+        keep &= ~_in_gap(source[d].values, clamped[d])
+    if not keep.all():
+        out = out.where(xr.DataArray(keep, dims="station"))
+    record["target_stations"] = n
+    record["stations_outside_source"] = beyond
+    record["action"] = (
+        f"grid sampled at the station locations ({method}); stations outside the "
+        "source grid, or inside a gap of it, are NaN"
+    )
+    return out, record
+
+
+def _xesmf(
+    source: xr.DataArray, target: dict[str, np.ndarray], curvilinear: bool, periodic: bool
+) -> xr.DataArray:
     try:
         import xesmf as xe
     except ImportError as exc:
@@ -182,7 +297,10 @@ def _xesmf(source: xr.DataArray, target: dict[str, np.ndarray], curvilinear: boo
                 "lon_b": ("lon_b", bounds_1d(source["lon"].values)),
             }
         )
-    regridder = xe.Regridder(src, tgt, "conservative_normed", unmapped_to_nan=True)
+    kwargs: dict[str, Any] = {"unmapped_to_nan": True}
+    if periodic:
+        kwargs["periodic"] = True
+    regridder = xe.Regridder(src, tgt, "conservative_normed", **kwargs)
     out = regridder(source, skipna=True, na_thres=1.0)
     if not isinstance(out, xr.DataArray):
         raise AlignmentError("xESMF returned an unexpected object")

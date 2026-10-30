@@ -33,7 +33,7 @@ _UNIT_HINTS = {
 class GridInfo:
     """What was found and changed in one input's coordinates."""
 
-    kind: str  # "rectilinear", "curvilinear" or "none"
+    kind: str  # "rectilinear", "curvilinear", "station" or "none"
     original_names: dict[str, str | None]
     changes: list[str] = field(default_factory=list)
 
@@ -110,6 +110,29 @@ def normalise_coords(da: xr.DataArray, role: str) -> tuple[xr.DataArray, GridInf
         da = da.rename(rename)
         info.changes.append("renamed " + ", ".join(f"{k} to {v}" for k, v in rename.items()))
 
+    if (
+        "lat" in da.coords
+        and "lon" in da.coords
+        and da["lat"].ndim == 1
+        and da["lon"].ndim == 1
+        and da["lat"].dims == da["lon"].dims
+        and da["lat"].dims[0] not in ("lat", "lon", "time")
+    ):
+        site = str(da["lat"].dims[0])
+        if site != "station":
+            if "station" in da.dims or "station" in da.coords:
+                raise ValueError(f"{role}: cannot use {site!r} as the station dimension")
+            da = da.rename({site: "station"})
+            info.changes.append(f"dimension {site} renamed to station")
+        info.kind = "station"
+        if "time" in da.coords and da["time"].ndim == 1 and da["time"].dims[0] != "time":
+            da = da.swap_dims({da["time"].dims[0]: "time"})
+        unsorted = "time" in da.dims and not da.indexes["time"].is_monotonic_increasing
+        if unsorted:
+            da = da.sortby("time")
+            info.changes.append("time sorted ascending")
+        return da, info
+
     for axis in ("lat", "lon", "time"):
         if axis in da.coords and da[axis].ndim == 1 and da[axis].dims[0] != axis:
             old = da[axis].dims[0]
@@ -174,6 +197,17 @@ def to_lon_frame(da: xr.DataArray, start: float) -> tuple[xr.DataArray, bool]:
     if da.sizes["lon"] > 1 and not np.all(np.diff(da["lon"].values) > 0):
         da = da.sortby("lon")
         changed = True
+    return da, changed
+
+
+def stations_to_lon_frame(da: xr.DataArray, start: float) -> tuple[xr.DataArray, bool]:
+    """Express a station longitude coordinate in [start, start + 360) (order kept)."""
+    lon = np.asarray(da["lon"].values, dtype=float)
+    new = start + np.mod(lon - start, 360.0)
+    new = np.where(np.isclose(new, start + 360.0), start, new)
+    changed = not np.allclose(new, lon)
+    if changed:
+        da = da.assign_coords(lon=("station", new))
     return da, changed
 
 

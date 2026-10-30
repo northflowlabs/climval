@@ -81,7 +81,12 @@ class Comparison:
         return self._computed
 
     def compute(self) -> Comparison:
-        """Compute every metric and the aligned-value hashes in one pass."""
+        """Compute every metric and the aligned-value hashes in one ``dask.compute`` call.
+
+        dask shares the tasks that read and align the inputs between all
+        samples and metrics, so each input chunk is read once. NumPy inputs
+        were aligned in memory already.
+        """
         if self._computed:
             return self
         names = list(self.samples)
@@ -90,12 +95,9 @@ class Comparison:
             "candidate": strided_sample(self.aligned.candidate),
         }
         lazy: list[Any] = [self.samples[n] for n in names] + list(hashes.values())
-        try:
-            import dask
+        import dask
 
-            done = dask.compute(*lazy)  # type: ignore[attr-defined,no-untyped-call]
-        except ImportError:
-            done = tuple(obj.compute() for obj in lazy)
+        done = dask.compute(*lazy)  # type: ignore[attr-defined,no-untyped-call]
         self.samples = dict(zip(names, done[: len(names)], strict=False))
         ref_s, can_s = done[len(names) :]
         self.provenance["aligned_values_sha256"] = {

@@ -12,7 +12,9 @@ import xarray as xr
 from climval.align import align
 from climval.align.inputs import InputLike
 from climval.align.region import RegionLike
-from climval.metrics.engine import DEFAULT_SAMPLES, evaluate
+from climval.align.temporal import DEFAULT_MIN_COVERAGE
+from climval.align.units import absolute_offset
+from climval.metrics.engine import DEFAULT_SAMPLES, complete_seasons, evaluate
 from climval.metrics.stats import BaseMetric, resolve_metrics
 from climval.provenance import environment, jsonable, timestamp
 from climval.result import Comparison
@@ -37,13 +39,15 @@ def compare(
     region: RegionLike = None,
     period: tuple[Any, Any] | None = None,
     regrid: str = "bilinear",
-    target: str | xr.DataArray | xr.Dataset = "reference",
+    target: str | xr.DataArray | xr.Dataset = "coarser",
     time: str = "intersect",
     freq: str | None = None,
+    min_coverage: float = DEFAULT_MIN_COVERAGE,
     units: str | Mapping[str, str] = "convert",
     weights: str | xr.DataArray | None = "area",
     area: xr.DataArray | None = None,
     by: str | None = None,
+    seasons: str = "contiguous",
     metrics: Sequence[str | BaseMetric] | None = None,
     samples: Sequence[str] = DEFAULT_SAMPLES,
     names: tuple[str, str] | None = None,
@@ -57,8 +61,12 @@ def compare(
     reference, candidate
         ``xarray.DataArray``, ``xarray.Dataset`` (with ``variable``), a path or
         URL to NetCDF, Zarr or CSV (local, or remote through fsspec, for
-        example ``gs://`` or ``s3://``), or a list of NetCDF paths. Data are
-        opened lazily and never loaded into memory as a whole.
+        example ``gs://`` or ``s3://``; Zarr stores are recognised by a
+        ``.zarr`` suffix or by their metadata), or a list of NetCDF paths.
+        NetCDF and Zarr are opened with dask chunks and read chunk by chunk
+        when the metrics are computed; CSV is read into memory. A CSV with
+        latitude and longitude columns that do not form a full grid is
+        station data (see :func:`climval.align.align`).
     variable
         Variable name, or a pair (reference name, candidate name) when they
         differ, for example ``("t2m", "tas")``. Optional for single-variable
@@ -72,27 +80,43 @@ def compare(
         read on calendar fields, so it means the same in every calendar.
     regrid
         "bilinear" (default), "nearest" or "conservative" (needs xESMF; the
-        only option for curvilinear grids).
+        only option for curvilinear grids, and the only one that averages a
+        fine grid over coarse cells).
     target
-        Grid to compare on: "reference" (default), "candidate", "coarser",
-        or an xarray object holding the target grid.
+        Grid to compare on: "coarser" (default since 0.2.0, the grid with the
+        larger cells), "reference", "candidate", or an xarray object holding
+        the target grid. With station data the stations are the target.
     time
         "intersect" (default) keeps the periods present in both;
         "exact" requires the same periods.
     freq
-        Common time frequency: "h", "D", "MS" (monthly) or "YS" (yearly).
-        Defaults to the coarser native frequency of the two inputs.
+        Common time frequency: "h" or "<N>h" (for example "3h"), "D", "MS"
+        (monthly) or "YS" (yearly). Defaults to the coarser native frequency
+        of the two inputs. Native frequencies come from time bounds, then
+        from a ``frequency`` attribute (CMIP vocabulary such as "mon",
+        "day", "3hr"), then from the time steps. Declare it on an input with
+        ``da.assign_attrs(frequency="mon")`` when the steps alone are
+        ambiguous (one month per year, a single time step).
+    min_coverage
+        Fraction (0 to 1] of a period's native steps that must hold a valid
+        value, per grid cell, for its aggregated value to count. Default 0.8.
     units
         "convert" (default) converts the candidate to the reference's units,
         "strict" requires equal units, "ignore" skips the check, or a dict
         {"reference": ..., "candidate": ...} declares units first.
     weights
-        "area" (default; cell area when available, else cos latitude),
+        "area" (default: the given or cell_measures area, else cell area computed
+        from the target grid's latitude and longitude bounds; see
+        :mod:`climval.align.weights`),
         "cos_lat", None for uniform weights, or a DataArray.
     area
         Cell area on the target grid (for example CMIP ``areacella``).
     by
         None, "season", "month" or "year": add per-group values.
+    seasons
+        "contiguous" (default): December belongs to the following year's
+        DJF and incomplete seasons are left out. "calendar": the 0.2.0
+        behaviour, every December, January and February form DJF.
     metrics
         Names or BaseMetric instances. Defaults to
         :data:`climval.metrics.DEFAULT_METRICS`.
@@ -102,8 +126,8 @@ def compare(
     names
         Display names (reference, candidate).
     compute
-        True (default) computes now in one dask pass. False returns a lazy
-        Comparison; call ``.compute()`` later.
+        True (default) computes every sample in one ``dask.compute`` call.
+        False returns a lazy Comparison; call ``.compute()`` later.
     open_kwargs
         Passed to the xarray opener for paths and URLs (for example
         ``storage_options``).
@@ -134,8 +158,10 @@ def compare(
         units=units,
         weights=weights,
         area=area,
+        min_coverage=min_coverage,
         open_kwargs=open_kwargs,
     )
+    offset = absolute_offset(pair.units)
     lazy = evaluate(
         pair.reference,
         pair.candidate,
@@ -146,7 +172,30 @@ def compare(
         samples=samples,
         by=by,
         frequency=pair.frequency,
+        time_weights=pair.time_weights,
+        seasons=seasons,
+        absolute_offset=offset,
     )
+    notes: dict[str, Any] = {}
+    ratio = [m.name for m in resolved_metrics if m.ratio_scale]
+    if ratio and offset:
+        notes["absolute_scale"] = (
+            f"{', '.join(ratio)} computed with both inputs shifted by {offset:g} "
+            f"{pair.units}, so their zero is absolute zero (these metrics divide by a "
+            "reference value)"
+        )
+    methods = {
+        sample: {
+            str(name): str(var.attrs["climval_method"])
+            for name, var in ds.data_vars.items()
+            if "climval_method" in var.attrs
+        }
+        for sample, ds in lazy.items()
+    }
+    methods = {k: v for k, v in methods.items() if v}
+    if by == "season" and pair.has_time:
+        dropped = complete_seasons(pair.reference["time"])[1] if seasons == "contiguous" else []
+        notes["seasons"] = {"mode": seasons, "incomplete_seasons_left_out": dropped}
     ref_name = names[0] if names else _name(reference, pair.inputs["reference"], "reference")
     can_name = names[1] if names else _name(candidate, pair.inputs["candidate"], "candidate")
     provenance = jsonable(
@@ -157,10 +206,13 @@ def compare(
             "options": {
                 **pair.options,
                 "by": by,
+                "seasons": seasons,
                 "samples": list(lazy),
                 "metrics": [m.name for m in resolved_metrics],
             },
             "steps": pair.steps,
+            "metric_notes": notes,
+            "metric_methods": methods,
         }
     )
     result = Comparison(

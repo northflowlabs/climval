@@ -220,7 +220,7 @@ class TestRegrid:
         lon_can = np.concatenate([np.arange(-180.0, -169.0, 2.0), np.arange(170.0, 180.0, 2.0)])
         can = make_field(np.array([-10.0, 10.0]), lon_can, times, linear)
         ref = make_field(np.array([0.0]), np.arange(-179.0, 180.0, 2.0), times, linear)
-        pair = align(ref, can)
+        pair = align(ref, can, target="reference")
         lon = pair.candidate["lon"]
         inside = (lon <= -170) | (lon >= 170)
         assert bool(pair.candidate.where(~inside).isnull().all())
@@ -269,7 +269,7 @@ class TestRegrid:
         with pytest.raises(CurvilinearGridError, match="regrid='conservative'"):
             align(ref_grid, curvi)
         with pytest.raises(CurvilinearGridError, match="cannot be the target grid"):
-            align(curvi, ref_grid, regrid="conservative")
+            align(curvi, ref_grid, regrid="conservative", target="reference")
 
     def test_conservative_with_real_xesmf(self, ref_grid: xr.DataArray) -> None:
         pytest.importorskip("xesmf")
@@ -306,7 +306,8 @@ class TestRegrid:
         monkeypatch.setitem(sys.modules, "xesmf", types.SimpleNamespace(Regridder=FakeRegridder))
         pair = align(ref_grid, ref_grid.isel(lat=slice(0, -1, 2)), regrid="conservative")
         assert calls["method"] == "conservative_normed"
-        assert calls["kw"] == {"unmapped_to_nan": True}
+        # ref_grid is global: xESMF is told so, and gets no wrapped seam columns
+        assert calls["kw"] == {"unmapped_to_nan": True, "periodic": True}
         lat_b = np.asarray(calls["lat_b"])
         assert lat_b.min() >= -90 and lat_b.max() <= 90
         assert pair.candidate.sizes == pair.reference.sizes
@@ -405,7 +406,9 @@ class TestTime:
             align_time(ref, ref.isel(time=0, drop=True))
 
     def test_classify(self) -> None:
-        assert classify_step(0.125) == "h"
+        assert classify_step(1.0 / 24.0) == "1h"
+        assert classify_step(0.125) == "3h"
+        assert classify_step(0.25) == "6h"
         assert classify_step(1.0) == "D"
         assert classify_step(30.0) == "MS"
         assert classify_step(365.0) == "YS"
@@ -492,10 +495,15 @@ class TestMissingAndWeights:
         assert bool(np.isnan(pair.reference[0, 0, 0])) and bool(np.isnan(pair.candidate[1, 2, 3]))
         assert int(pair.valid.sum()) == ref_grid.size - 2
 
-    def test_cos_lat_default(self, ref_grid: xr.DataArray) -> None:
+    def test_cell_area_default_is_cos_lat_on_uniform_grid(self, ref_grid: xr.DataArray) -> None:
         pair = align(ref_grid, ref_grid)
         assert pair.weights is not None
-        np.testing.assert_allclose(pair.weights.values, np.cos(np.deg2rad(ref_grid["lat"].values)))
+        w = pair.weights.isel(lon=0).values
+        cos = np.cos(np.deg2rad(ref_grid["lat"].values))
+        np.testing.assert_allclose(w / w.sum(), cos / cos.sum(), rtol=1e-12)
+        explicit = align(ref_grid, ref_grid, weights="cos_lat")
+        assert explicit.weights is not None
+        np.testing.assert_allclose(explicit.weights.values, cos)
 
     def test_area_from_cell_measures(self, ref_grid: xr.DataArray) -> None:
         area = xr.DataArray(

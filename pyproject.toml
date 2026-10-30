@@ -36,6 +36,8 @@ dependencies = [
     "xarray>=2023.9",
     # Model calendars (noleap, 360_day, ...) decode only with cftime.
     "cftime>=1.6",
+    # Files open as dask arrays and every metric is computed in one dask pass.
+    "dask[array]>=2023.6",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +57,9 @@ cloud   = [
 regrid  = ["xesmf>=0.8"]
 units   = ["pint>=0.22", "cf_xarray>=0.8"]
 regions = ["regionmask>=0.11"]
-cftime  = ["cftime>=1.6"]  # kept for compatibility; cftime is a core dependency
+# No-op alias kept so that existing "climval[cftime]" installs keep working;
+# cftime is a core dependency.
+cftime  = ["cftime>=1.6"]
 viz     = ["matplotlib>=3.7", "cartopy>=0.21"]
 all = [
     "netCDF4>=1.6",
