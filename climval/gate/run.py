@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Run the checks of a :class:`~climval.gate.config.GateConfig`.
 
 Each check runs :func:`climval.compare` once per variable and evaluates its

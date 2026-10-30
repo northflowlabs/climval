@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The :class:`Comparison` result returned by :func:`climval.compare`."""
 
 from __future__ import annotations

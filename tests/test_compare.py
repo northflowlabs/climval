@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """End-to-end tests of climval.compare and the Comparison result."""
 
 from __future__ import annotations

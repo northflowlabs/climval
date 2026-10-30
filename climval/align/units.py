@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Unit checks and conversion.
 
 The candidate is converted to the reference's units. A small built-in table

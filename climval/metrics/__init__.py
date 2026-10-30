@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from climval.metrics.stats import (
     DEFAULT_METRICS,
     MAE,

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Small synthetic fields for the tests (kept tiny: the CI machines are small)."""
 
 from __future__ import annotations

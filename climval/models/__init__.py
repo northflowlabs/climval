@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from climval.models.schema import (
     STANDARD_VARIABLES,
     BenchmarkResult,

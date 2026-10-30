@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Alignment: put a reference and a candidate on the same points.
 
 :func:`align` runs these steps in order and records each one:

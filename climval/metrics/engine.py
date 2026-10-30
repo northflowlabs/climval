@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Evaluate metrics on an aligned pair, per sample and per group.
 
 A *sample* says which points a number is computed over:

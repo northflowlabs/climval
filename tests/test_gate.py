@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """climval check: configuration, runs, exit codes, outputs and catalogue inputs."""
 
 from __future__ import annotations

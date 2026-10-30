@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Resolve user inputs (DataArray, Dataset, path or URL) to a DataArray.
 
 NetCDF and Zarr paths and URLs are opened with dask chunks (``chunks={}``

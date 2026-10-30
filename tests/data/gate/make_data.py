@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Write the two small synthetic files the gate tests and the Action workflow use.
 
 Run from the repository root: python tests/data/gate/make_data.py

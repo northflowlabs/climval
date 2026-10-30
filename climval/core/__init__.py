@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from climval.core.loader import load_model
 from climval.core.report import BenchmarkReport
 from climval.core.suite import BenchmarkSuite

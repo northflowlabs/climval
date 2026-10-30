@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Regions: latitude and longitude boxes, and regionmask regions.
 
 A :class:`Box` is applied before regridding. Its longitude range may cross

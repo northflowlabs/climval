@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Regression tests from the second release review of the gate, the CLI and thresholds."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Metric correctness: hand-computed cases and agreement with xskillscore."""
 
 from __future__ import annotations

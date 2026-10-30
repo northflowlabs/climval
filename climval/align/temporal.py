@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Time alignment across calendars and frequencies.
 
 Two inputs rarely share timestamps: a model in a ``noleap`` or ``360_day``

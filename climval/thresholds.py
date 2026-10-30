@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Evaluate pass or fail thresholds against a comparison.
 
 This is the hook for CI gates: a dict of limits in, a :class:`ThresholdResult`

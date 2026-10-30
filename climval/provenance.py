@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Provenance: what was compared, how, and with which software.
 
 Every :class:`~climval.Comparison` carries a JSON-serialisable record with

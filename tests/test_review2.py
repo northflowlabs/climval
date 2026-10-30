@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Regression tests for the second independent review of 0.2.0 (alignment and metrics).
 
 Names follow the review: C critical, M major, m minor, n nit. The scale tests

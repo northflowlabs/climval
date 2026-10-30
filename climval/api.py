@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The primary API: :func:`compare`, plus :func:`demo` and :func:`demo_data`."""
 
 from __future__ import annotations

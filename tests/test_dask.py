@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Dask: inputs stay lazy until compute, one pass computes everything, results match NumPy."""
 
 from __future__ import annotations

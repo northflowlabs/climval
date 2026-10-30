@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Spatial weights for every spatial mean.
 
 ``weights="area"`` (default) uses, in this order,

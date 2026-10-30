@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Read and validate a ``climval check`` configuration file.
 
 A configuration is YAML (``.yml``, ``.yaml``), TOML (``.toml``) or JSON

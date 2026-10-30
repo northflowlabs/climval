@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The ``climval check`` validation gate.
 
 A configuration file declares checks (reference, candidate, variable,

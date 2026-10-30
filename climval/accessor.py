@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """xarray accessors: ``candidate.climval.compare(reference, ...)``.
 
 Registered when climval is imported. The object the accessor is called on is

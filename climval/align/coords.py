@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """CF-aware coordinate detection and normalisation.
 
 Latitude, longitude and time are found through cf_xarray when it is

@@ -51,6 +51,11 @@ plugins:
       execute: false
       include_source: true
       include: ["examples/*.ipynb"]
+      # Only the notebooks are notebooks. Without this, mkdocs-jupyter reads
+      # every Markdown page through jupytext (and pandoc, when installed) to
+      # look for a kernel, and pandoc warns about the mkdocstrings "::: name"
+      # lines in the API pages.
+      ignore: ["*.md"]
   - mkdocstrings:
       default_handler: python
       handlers:

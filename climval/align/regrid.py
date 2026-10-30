@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Horizontal regridding onto a target grid.
 
 * ``bilinear``: xarray ``interp`` with linear interpolation along latitude and

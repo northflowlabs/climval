@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Regression tests for the findings of the independent review of 0.2.0.
 
 Each test reproduces the case that went wrong (names follow the review:

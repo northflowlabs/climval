@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Console, Markdown and HTML renderings of a :class:`~climval.gate.run.GateReport`.
 
 The Markdown suits a GitHub job summary (``$GITHUB_STEP_SUMMARY``): one

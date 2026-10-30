@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Exception types raised by climval.
 
 Every error climval raises on purpose derives from :class:`ClimvalError`, so a
