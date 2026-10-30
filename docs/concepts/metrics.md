@@ -38,7 +38,10 @@ metrics xskillscore does not have against independent NumPy definitions to
 | `kge` | \(1 - \sqrt{(R - 1)^2 + (\alpha - 1)^2 + (\beta - 1)^2}\), \(\alpha = \sigma_c / \sigma_r\), \(\beta = \langle c \rangle / \langle r \rangle\) | 1 | 1 |
 | `percentile_bias_pN` | \(100\,(Q_c - Q_r) / \lvert Q_r \rvert\), \(Q\) the weighted N-th percentile | % | 0 |
 
-`n_points` (the number of valid points pooled) is reported with every sample.
+`n_points` is reported with every sample: the number of points pooled, that
+is points where both values are valid and the weight is positive. Points with
+zero weight (for example from a zero area or time weight) take no part in any
+metric and are not counted.
 
 Metrics can be named by aliases wherever a name is taken (`metrics=`,
 thresholds, `climval check` files): `bias` and `me` for `mean_bias`,

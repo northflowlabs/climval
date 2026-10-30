@@ -100,7 +100,7 @@ checks:
 | `time` | `intersect` or `exact` |
 | `units` | `convert`, `strict`, `ignore` or `{reference: UNITS, candidate: UNITS}` |
 | `weights` | `area` (default: cell area from the grid's bounds), `cos_lat` or `none` |
-| `metrics` | list of metric names or aliases (default: all default metrics) |
+| `metrics` | list of metric names or aliases (default: the default metrics; a threshold on any other metric, such as `spearman_r` or `percentile_bias_p99_9`, needs it listed here) |
 | `samples` | list of samples (default `[space_time, climatology]`) |
 | `names` | `[reference name, candidate name]` for the reports |
 | `open_kwargs` | passed to the xarray opener for both inputs |
@@ -119,9 +119,9 @@ checks:
 | `name` | display name |
 
 Everything is validated before any data is opened: unknown keys, invalid
-choices, unknown metrics, thresholds on samples that are not computed,
-limits that are not finite numbers, `min` above `max`, a negative `abs_max`,
-and groups that the check's `by` does not produce are configuration errors
+choices, unknown metrics, thresholds on metrics or samples that are not
+computed, limits that are not finite numbers, `min` above `max`, a negative
+`abs_max`, and groups that the check's `by` does not produce are configuration errors
 (exit code 2). The groups are `DJF`, `MAM`, `JJA` and `SON` for
 `by: season`, `Jan` to `Dec` for `by: month`, a year such as `2001` for
 `by: year`, and `all` or `"*"` with any `by`. A year that is well formed but

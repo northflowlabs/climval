@@ -174,7 +174,8 @@ def _reduce_all(
             out[m.name] = (
                 value.reset_coords(drop=True) if isinstance(value, xr.DataArray) else value
             )
-    out["n_points"] = valid.sum(list(dims))
+    # Points that count: both values valid and a positive weight.
+    out["n_points"] = (valid & (w > 0)).sum(list(dims))
     return xr.Dataset(out)
 
 

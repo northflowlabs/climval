@@ -330,19 +330,19 @@ class BenchmarkReport:
 
     def summary(self) -> None:
         """Print a formatted summary table to stdout."""
-        print(f"\n{'═' * 72}")
+        print(f"\n{'=' * 72}")
         print(f"  CLIMVAL: {self.suite_name.upper()}")
         print(f"  Reference : {self.reference.name}")
         print(f"  Generated : {self.generated_at.strftime('%Y-%m-%d %H:%M UTC')}")
-        print(f"{'═' * 72}\n")
+        print(f"{'=' * 72}\n")
         if self.synthetic:
             print(f"  WARNING: {self._synthetic_notice()}\n")
 
         for result in self.results:
-            print(f"  ▸ Candidate: {result.candidate}")
-            print(f"  {'─' * 66}")
+            print(f"  Candidate: {result.candidate}")
+            print(f"  {'-' * 66}")
             print(f"  {'Variable':<10} {'Metric':<28} {'Value':>12}  {'Units'}")
-            print(f"  {'─' * 66}")
+            print(f"  {'-' * 66}")
             for m in result.metrics:
                 val = f"{m.value:>12.4f}" if m.value == m.value else f"{'NaN':>12}"
                 print(f"  {m.variable:<10} {m.metric_name:<28} {val}  {m.units}")

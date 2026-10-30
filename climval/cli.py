@@ -238,7 +238,11 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     if args.output:
         report.export(args.output)
-        print(f"  ✓ Report exported → {args.output}\n")
+        print(f"  Report exported to {args.output}\n")
+
+
+_SIGNED_METRICS = frozenset({"mean_bias"})
+"""Metrics besides the percentile biases that can be negative; the best value is 0."""
 
 
 def cmd_list_metrics(_args: argparse.Namespace) -> None:
@@ -246,9 +250,14 @@ def cmd_list_metrics(_args: argparse.Namespace) -> None:
 
     print("\n  Available metrics:\n")
     for name, metric in METRIC_REGISTRY.items():
-        direction = "↑ higher better" if metric.higher_is_better else "↓ lower better"
         if name == "std_ratio":
             direction = "best at 1"
+        elif metric.higher_is_better:
+            direction = "higher is better"
+        elif name in _SIGNED_METRICS or name.startswith("percentile_bias"):
+            direction = "smaller magnitude is better"
+        else:
+            direction = "lower is better"
         print(f"  {name:<30} {direction}")
     print()
 
@@ -407,8 +416,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _safe_console() -> None:
+    """Replace characters the console encoding cannot show instead of failing.
+
+    On Windows, stdout piped to another program uses the ANSI code page
+    (for example cp1252), which cannot encode every character in a name or
+    a path; printing one would otherwise raise UnicodeEncodeError.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns the exit code (``climval check`` uses 0, 1 and 2)."""
+    _safe_console()
     parser = build_parser()
     args = parser.parse_args(_join_negative_values(list(sys.argv[1:] if argv is None else argv)))
     code = args.func(args)

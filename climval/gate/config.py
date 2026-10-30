@@ -432,7 +432,7 @@ def _check_group(group: str, by: str | None, where: str) -> None:
 def _parse_thresholds(
     value: Any, where: str, metrics: list[str] | None, samples: list[str], by: str | None
 ) -> list[dict[str, Any]]:
-    from climval.metrics.stats import get_metric
+    from climval.metrics.stats import DEFAULT_METRICS, get_metric
     from climval.thresholds import validate_limits
 
     if value is None or (isinstance(value, (Mapping, list)) and not value):
@@ -463,6 +463,7 @@ def _parse_thresholds(
     else:
         raise ConfigError(f"{where}: thresholds are a mapping or a list")
 
+    computed = {m.name for m in DEFAULT_METRICS}
     out: list[dict[str, Any]] = []
     for loc, item in items:
         _no_unknown(item, THRESHOLD_KEYS, loc)
@@ -475,6 +476,11 @@ def _parse_thresholds(
             metric = canonical
             if metrics is not None and metric not in metrics:
                 raise ConfigError(f"{loc}: metric {metric!r} is not in this check's metrics")
+            if metrics is None and metric not in computed:
+                raise ConfigError(
+                    f"{loc}: metric {metric!r} is not computed by default; list the metrics "
+                    f"to compute under this check's 'metrics:', including {metric!r}"
+                )
         limits = {k: _limit(item[k], f"{loc}.{k}") for k in LIMIT_KEYS if k in item}
         if not limits:
             raise ConfigError(f"{loc}: give at least one of {list(LIMIT_KEYS)}")
