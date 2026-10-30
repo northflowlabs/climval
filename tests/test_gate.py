@@ -397,10 +397,15 @@ def test_cli_summary_without_github(
 
 def _write_catalog(root: Path) -> Path:
     can = xr.open_dataset(root / "candidate.nc").load()
+    assert can["tas"].attrs["units"] == "degC"
     rows = []
     for member, shift in (("r1i1p1f1", 0.0), ("r2i1p1f1", 0.5)):
         store = root / f"tas_{member}.zarr"
-        (can + shift).assign_attrs(can.attrs).to_zarr(store, mode="w", consolidated=True)
+        # Arithmetic drops the variables' attributes (units among them) on xarray
+        # before 2025.11, where keep_attrs defaulted to False; keep them on every version.
+        with xr.set_options(keep_attrs=True):
+            member_ds = can + shift
+        member_ds.to_zarr(store, mode="w", consolidated=True)
         rows.append(f"SYN,SYNTHETIC-MODEL,historical,{member},Amon,tas,gn,{store.as_posix()}")
     csv = root / "catalog.csv"
     csv.write_text(
@@ -475,6 +480,10 @@ def test_catalog_input(gate_dir: Path) -> None:
     report = run(parse_config(one, base_dir=gate_dir))
     o = report.outcomes[0]
     assert o.status == "pass", o.error
+    # the variable's units come through intake-esm's aggregation and are converted
+    assert o.comparison is not None
+    units = next(s for s in o.comparison.provenance["steps"] if s["step"] == "units")
+    assert units["candidate_units"] == "degC" and units["reference_units"] == "K"
     assert o.inputs["candidate"]["squeezed"] == ["member_id"]
     assert o.comparison is not None and "member_id" not in o.comparison.candidate.dims
     assert "SYNTHETIC-MODEL r1i1p1f1" == o.comparison.candidate_name

@@ -141,8 +141,13 @@ def test_m6_thirty_years_daily_from_hourly_builds_in_seconds() -> None:
     res, tasks, seconds = _build(ref, can, by="season")
     added = tasks - _input_tasks(ref["t2m"], can["tas"])
     # About six tasks per input chunk of one day (10 950 chunks): latitude sort,
-    # two window reductions, and the merge into whole-field chunks.
-    assert added < 80_000, added
+    # two window reductions, and the merge into whole-field chunks. Current
+    # xarray, dask and flox add about 67 000 tasks; the lowest supported versions
+    # add about 80 000 (older dask rechunks in more pieces and older xarray maps
+    # where and isnan over more of them), with the same 43 aligned chunks. A
+    # graph with one task per hour (262 800 hours) or per hour and column piece
+    # is far above this bound.
+    assert added < 90_000, added
     assert seconds < 120
     assert res.aligned.reference.sizes["time"] == 30 * 365
 

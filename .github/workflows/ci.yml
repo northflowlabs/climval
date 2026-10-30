@@ -83,7 +83,7 @@ jobs:
           python-version: "3.10"
       # uv resolves every direct requirement (core and the extras below) to the
       # lowest version its specifier allows that exists, for example
-      # intake-esm 2023.6.14 for "intake-esm>=2023.6", and leaves the rest free.
+      # intake-esm 2025.2.3 for "intake-esm>=2025.2.3", and leaves the rest free.
       # Left out: "regrid" (xESMF needs the ESMF library from conda-forge; the
       # xesmf job covers it with current versions), "cftime" (an alias of a core
       # dependency) and "docs" and "dev" (tools, not runtime requirements).

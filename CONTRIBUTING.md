@@ -59,7 +59,9 @@ action in `action.yml` on them.
 ## Code standards
 
 - **Ruff** for linting: `ruff check climval/ tests/`
-- **Mypy** for types: `mypy climval/`
+- **Mypy** for types: `mypy climval/`. The result depends on the NumPy type
+  stubs; CI runs it on Python 3.11 with the newest releases, so run
+  `pip install -U -e ".[dev]"` first for the same result
 - All public functions must have docstrings
 - All new metrics must have at least one unit test with a known analytical value
 - All new code must be covered to at least 90%

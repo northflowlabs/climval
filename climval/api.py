@@ -249,12 +249,13 @@ def demo_data(seed: int = 0) -> tuple[xr.DataArray, xr.DataArray]:
         la = np.deg2rad(lat)[None, :, None]
         lo = np.deg2rad(lon)[None, None, :]
         season = np.cos(2 * np.pi * (months[:, None, None] - 1) / 12.0)
-        return (
+        values: np.ndarray = (
             288.0
             - 30.0 * np.sin(la) ** 2
             + 3.0 * np.cos(lo) * np.cos(la)
             + 8.0 * np.sin(la) * season
         )
+        return values
 
     ref_lat = np.arange(-88.0, 90.0, 4.0)
     ref_lon = np.arange(-178.0, 180.0, 4.0)

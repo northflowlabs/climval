@@ -66,7 +66,7 @@ regions = ["regionmask>=0.11"]
 # cftime is a core dependency.
 cftime  = ["cftime>=1.6"]
 # intake-esm catalogues (for example the Pangeo CMIP6 catalogue) as inputs.
-catalog = ["intake-esm>=2023.6"]
+catalog = ["intake-esm>=2025.2.3"]
 all = [
     "netCDF4>=1.6",
     "h5netcdf>=1.1",
@@ -81,7 +81,7 @@ all = [
     "cf_xarray>=0.8",
     "regionmask>=0.11",
     "cftime>=1.6",
-    "intake-esm>=2023.6",
+    "intake-esm>=2025.2.3",
 ]
 docs = [
     "mkdocs>=1.6,<2",
@@ -102,7 +102,7 @@ dev = [
     "cftime>=1.6",
     "pint>=0.22",
     "cf_xarray>=0.8",
-    "intake-esm>=2023.6",
+    "intake-esm>=2025.2.3",
 ]
 
 [project.scripts]

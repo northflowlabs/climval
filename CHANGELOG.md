@@ -105,8 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extras: `cloud`, `regrid`, `units`, `regions`; Python 3.13 in CI. The
   `cftime` extra is kept as a no-op alias, because cftime is a core
   dependency
-- CI job that installs every core dependency at its lower bound on
-  Python 3.10 and runs the tests
+- CI jobs that install every core dependency at its lower bound on
+  Python 3.10, and the extras at their lower bounds, and run the tests
 - `climval check CONFIG`: a validation gate for CI. A YAML, TOML or JSON
   file declares checks (reference and candidate as paths, URLs or intake-esm
   catalogue queries, variables, region, period, frequency, `min_coverage`,
@@ -136,8 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@v0.2.0`), it installs the same climval version unless `version` says
   otherwise. The workflow `.github/workflows/action.yml` exercises it on
   committed test data
-- `catalog` extra (intake-esm) and `docs` extra (MkDocs Material,
-  mkdocstrings, mkdocs-jupyter)
+- `catalog` extra (intake-esm 2025.2.3 or newer: earlier releases import
+  `pkg_resources`, which setuptools 82 removed, and 2023.6 needs pydantic 1)
+  and `docs` extra (MkDocs Material, mkdocstrings, mkdocs-jupyter)
 - Documentation site at https://northflowlabs.github.io/climval/: getting
   started, concepts with formulas, how-to guides, API reference and examples,
   built strictly on every push and deployed from main
