@@ -1,0 +1,15 @@
+# The first check of pass.yml in TOML.
+version = 1
+
+[[checks]]
+name = "europe"
+reference = "reference.nc"
+candidate = "candidate.nc"
+variable = { reference = "t2m", candidate = "tas" }
+region = { lat = [35, 70], lon = [-10, 40] }
+by = "season"
+
+[checks.thresholds]
+rmse = { max = 2.0 }
+mean_bias = { abs_max = 1.5, group = "*" }
+pearson_r = { min = 0.95, sample = "climatology" }

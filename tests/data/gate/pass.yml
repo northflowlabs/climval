@@ -1,0 +1,23 @@
+# climval check configuration used by the tests and the Action workflow.
+# The data are synthetic (see make_data.py); every limit here holds.
+version: 1
+defaults:
+  reference: reference.nc
+  candidate: candidate.nc
+  variable: {reference: t2m, candidate: tas}
+  names: [synthetic reference, synthetic model]
+checks:
+  - name: europe
+    description: Whole box, seasonal groups, synthetic data
+    region: {lat: [35, 70], lon: [-10, 40]}
+    by: season
+    thresholds:
+      rmse: {max: 2.0}
+      mean_bias: {abs_max: 1.5, group: "*"}
+      pearson_r: {min: 0.95, sample: climatology}
+  - name: north
+    region: [55, 70, 0, 30]
+    period: ["2001", "2002"]
+    thresholds:
+      - {metric: crmse, max: 1.5}
+      - {metric: std_ratio, min: 0.8, max: 1.25, sample: climatology}

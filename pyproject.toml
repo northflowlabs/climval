@@ -38,6 +38,9 @@ dependencies = [
     "cftime>=1.6",
     # Files open as dask arrays and every metric is computed in one dask pass.
     "dask[array]>=2023.6",
+    # climval check reads YAML and TOML configuration files.
+    "pyyaml>=6.0",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -60,6 +63,8 @@ regions = ["regionmask>=0.11"]
 # No-op alias kept so that existing "climval[cftime]" installs keep working;
 # cftime is a core dependency.
 cftime  = ["cftime>=1.6"]
+# intake-esm catalogues (for example the Pangeo CMIP6 catalogue) as inputs.
+catalog = ["intake-esm>=2023.6"]
 viz     = ["matplotlib>=3.7", "cartopy>=0.21"]
 all = [
     "netCDF4>=1.6",
@@ -77,6 +82,13 @@ all = [
     "cftime>=1.6",
     "matplotlib>=3.7",
     "cartopy>=0.21",
+    "intake-esm>=2023.6",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+    "mkdocs-jupyter>=0.25",
 ]
 dev = [
     "pytest>=7.4",
@@ -91,6 +103,7 @@ dev = [
     "cftime>=1.6",
     "pint>=0.22",
     "cf_xarray>=0.8",
+    "intake-esm>=2023.6",
 ]
 
 [project.scripts]
@@ -100,6 +113,7 @@ climval = "climval.cli:main"
 Homepage    = "https://research.northflow.no/systems/climval"
 Repository  = "https://github.com/northflowlabs/climval"
 Issues      = "https://github.com/northflowlabs/climval/issues"
+Documentation = "https://northflowlabs.github.io/climval/"
 Changelog   = "https://github.com/northflowlabs/climval/blob/main/CHANGELOG.md"
 Organisation = "https://northflow.no"
 

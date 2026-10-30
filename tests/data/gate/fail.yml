@@ -1,0 +1,12 @@
+# Same data as pass.yml with a bias limit the synthetic model does not meet.
+# climval check exits with code 1.
+version: 1
+checks:
+  - name: europe-strict
+    reference: reference.nc
+    candidate: candidate.nc
+    variable: {reference: t2m, candidate: tas}
+    region: {lat: [35, 70], lon: [-10, 40]}
+    thresholds:
+      mean_bias: {abs_max: 0.5}
+      rmse: {max: 2.0}

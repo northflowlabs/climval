@@ -33,3 +33,7 @@ class UnitsError(ClimvalError, ValueError):
 
 class MissingDependencyError(ClimvalError, ImportError):
     """An optional dependency needed for the requested option is not installed."""
+
+
+class ConfigError(ClimvalError, ValueError):
+    """A ``climval check`` configuration file is missing, unreadable or invalid."""

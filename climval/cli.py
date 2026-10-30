@@ -2,6 +2,7 @@
 climval CLI
 ===========
 Usage:
+    climval check climval.yml --output-dir climval-report --github-summary
     climval compare REFERENCE CANDIDATE --variable tas --by season --output report.html
     climval run --reference era5 --ref-path era5.nc --candidates mpi --candidate-paths mpi.nc
     climval demo
@@ -107,6 +108,68 @@ def cmd_compare(args: argparse.Namespace) -> None:
     if args.output:
         result.export(args.output)
         print(f"\n  Report written to {args.output}\n")
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Run the checks of a configuration file; the return value is the exit code."""
+    import os
+
+    from climval.errors import ConfigError
+    from climval.gate import EXIT_PASS, GateReport, load_config, run
+
+    try:
+        config = load_config(args.config).select(args.check or [])
+    except ConfigError as exc:
+        report = GateReport(outcomes=[], config_path=args.config, config_error=str(exc))
+        config = None
+    if config is not None and args.validate:
+        names = ", ".join(c.name for c in config.checks)
+        print(f"climval check: {args.config} is valid ({len(config.checks)} checks: {names})")
+        return EXIT_PASS
+    if config is not None:
+        progress = None if args.quiet else (lambda msg: print(f"climval check: {msg}", flush=True))
+        report = run(config, verbose=args.verbose, progress=progress)
+
+    if not args.quiet or report.exit_code != EXIT_PASS:
+        print(report.summary_text())
+
+    json_path = args.json
+    md_path = args.markdown
+    html_path = args.html
+    if args.output_dir:
+        out = args.output_dir
+        json_path = json_path or os.path.join(out, "climval-check.json")
+        md_path = md_path or os.path.join(out, "climval-check.md")
+        html_path = html_path or os.path.join(out, "climval-check.html")
+    written = []
+    if json_path:
+        report.to_json(json_path)
+        written.append(json_path)
+    if md_path:
+        _write_text(md_path, report.to_markdown())
+        written.append(md_path)
+    if html_path:
+        _write_text(html_path, report.to_html())
+        written.append(html_path)
+    if args.github_summary:
+        target = os.environ.get("GITHUB_STEP_SUMMARY")
+        if target:
+            _write_text(target, report.to_markdown() + "\n", append=True)
+            written.append("$GITHUB_STEP_SUMMARY")
+        else:
+            print("climval check: GITHUB_STEP_SUMMARY is not set; no job summary written")
+    if written and not args.quiet:
+        print("\n  Written: " + ", ".join(written))
+    return report.exit_code
+
+
+def _write_text(path: str, text: str, append: bool = False) -> None:
+    from pathlib import Path
+
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a" if append else "w", encoding="utf-8") as fh:
+        fh.write(text)
 
 
 def cmd_demo(args: argparse.Namespace) -> None:
@@ -242,6 +305,41 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument("--output", default=None, help="Output path (.html/.json/.md)")
     cmp_p.set_defaults(func=cmd_compare)
 
+    # check
+    chk_p = sub.add_parser(
+        "check",
+        help="Run the checks in a configuration file (a CI gate)",
+        description=(
+            "Run the checks declared in a YAML, TOML or JSON file. Exit code 0: every "
+            "check passed. 1: a threshold failed. 2: the configuration or the data "
+            "could not be used."
+        ),
+    )
+    chk_p.add_argument("config", help="Configuration file (.yml, .yaml, .toml or .json)")
+    chk_p.add_argument(
+        "--check", action="append", default=None, metavar="NAME", help="Run only this check"
+    )
+    chk_p.add_argument("--json", default=None, metavar="PATH", help="Write the result as JSON")
+    chk_p.add_argument("--markdown", default=None, metavar="PATH", help="Write a Markdown summary")
+    chk_p.add_argument("--html", default=None, metavar="PATH", help="Write an HTML report")
+    chk_p.add_argument(
+        "--output-dir",
+        default=None,
+        metavar="DIR",
+        help="Write climval-check.json, .md and .html into DIR",
+    )
+    chk_p.add_argument(
+        "--github-summary",
+        action="store_true",
+        help="Append the Markdown summary to $GITHUB_STEP_SUMMARY",
+    )
+    chk_p.add_argument(
+        "--validate", action="store_true", help="Only validate the configuration file"
+    )
+    chk_p.add_argument("--verbose", action="store_true", help="Show tracebacks for errors")
+    chk_p.add_argument("--quiet", action="store_true", help="Print only on failure")
+    chk_p.set_defaults(func=cmd_check)
+
     # demo
     demo_p = sub.add_parser("demo", help="Compare two synthetic example fields")
     demo_p.add_argument("--by", default=None, choices=["season", "month", "year"])
@@ -285,11 +383,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI. Returns the exit code (``climval check`` uses 0, 1 and 2)."""
     parser = build_parser()
     args = parser.parse_args(_join_negative_values(list(sys.argv[1:] if argv is None else argv)))
-    args.func(args)
+    code = args.func(args)
+    return int(code) if isinstance(code, int) else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

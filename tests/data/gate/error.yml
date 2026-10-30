@@ -1,0 +1,9 @@
+# A candidate file that does not exist: climval check exits with code 2.
+version: 1
+checks:
+  - name: missing-candidate
+    reference: reference.nc
+    candidate: does-not-exist.nc
+    variable: {reference: t2m, candidate: tas}
+    thresholds:
+      rmse: {max: 2.0}

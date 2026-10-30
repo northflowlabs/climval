@@ -32,6 +32,8 @@ htmlcov/
 *.zarr
 *.h5
 *.hdf5
+# Small committed test data for climval check and the Action
+!tests/data/gate/*.nc
 
 # Results
 results/
@@ -48,3 +50,8 @@ results/
 # OS
 .DS_Store
 Thumbs.db
+
+# Documentation build
+site/
+# Notebook scratch output
+examples/output/
