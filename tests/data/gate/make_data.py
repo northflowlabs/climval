@@ -30,7 +30,9 @@ def field(lat: np.ndarray, lon: np.ndarray, months: np.ndarray) -> np.ndarray:
 def main() -> None:
     rng = np.random.default_rng(42)
     attrs = {"title": "synthetic test data for climval check", "synthetic_data": "yes"}
-    enc = {"zlib": True, "complevel": 5, "dtype": "float32"}
+    # NetCDF3 so that SciPy reads it: the core install has no netCDF4 or h5netcdf.
+    enc = {"dtype": "float32"}
+    fmt = {"format": "NETCDF3_64BIT", "engine": "scipy"}
 
     lat = np.arange(31.0, 76.0, 2.0)
     lon = np.arange(-15.0, 46.0, 2.0)
@@ -41,7 +43,7 @@ def main() -> None:
         coords={"time": time, "lat": lat, "lon": lon},
         attrs=attrs,
     )
-    ref.to_netcdf(HERE / "reference.nc", encoding={"t2m": enc})
+    ref.to_netcdf(HERE / "reference.nc", encoding={"t2m": enc}, **fmt)
 
     clat = np.arange(80.0, 19.0, -5.0)
     clon = np.arange(2.5, 360.0, 5.0)
@@ -62,7 +64,7 @@ def main() -> None:
         coords={"time": ctime, "lat": clat, "lon": clon},
         attrs={**attrs, "source_id": "SYNTHETIC-MODEL"},
     )
-    can.to_netcdf(HERE / "candidate.nc", encoding={"tas": enc})
+    can.to_netcdf(HERE / "candidate.nc", encoding={"tas": enc}, **fmt)
 
 
 if __name__ == "__main__":

@@ -463,15 +463,16 @@ def test_configuration_examples_in_the_docs_are_valid() -> None:
 
     import yaml
 
-    docs = Path(__file__).parent.parent / "docs"
+    root = Path(__file__).parent.parent
+    docs = root / "docs"
     if not docs.is_dir():
         pytest.skip("docs/ not present")
     blocks = []
-    for page in sorted(docs.rglob("*.md")):
+    for page in [root / "README.md", *sorted(docs.rglob("*.md"))]:
         for block in re.findall(r"```yaml\n(.*?)```", page.read_text(encoding="utf-8"), re.S):
             if re.search(r"^checks:", block, re.M):
                 blocks.append((page.name, block))
-    assert len(blocks) >= 2
+    assert len(blocks) >= 3
     for name, block in blocks:
         config = parse_config(yaml.safe_load(block))
         assert config.checks, name

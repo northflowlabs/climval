@@ -4,10 +4,11 @@
 
 climval is a Python library that validates climate model output against reference data. It puts both datasets on the same grid, period and units, then computes weighted metrics with xarray, lazily on dask arrays, and records how every number was made.
 
-[Research page](https://research.northflow.no/systems/climval) · [PyPI](https://pypi.org/project/climval/) · [Notebooks](https://github.com/northflowlabs/northflow-notebooks) · [Licence](#licence)
+[Documentation](https://northflowlabs.github.io/climval/) · [Examples](https://github.com/northflowlabs/climval/tree/main/examples) · [GitHub Action](https://northflowlabs.github.io/climval/how-to/github-action/) · [PyPI](https://pypi.org/project/climval/) · [Research page](https://research.northflow.no/systems/climval) · [Licence](#licence)
 
 [![PyPI](https://img.shields.io/pypi/v/climval?color=0e6b63)](https://pypi.org/project/climval/)
 [![CI](https://github.com/northflowlabs/climval/actions/workflows/ci.yml/badge.svg)](https://github.com/northflowlabs/climval/actions/workflows/ci.yml)
+[![Docs](https://github.com/northflowlabs/climval/actions/workflows/docs.yml/badge.svg)](https://northflowlabs.github.io/climval/)
 [![Licence: Apache 2.0](https://img.shields.io/badge/licence-Apache%202.0-0e6b63)](https://github.com/northflowlabs/climval/blob/main/LICENSE)
 
 ## Why climval
@@ -22,39 +23,74 @@ Every lab compares climate models with its own scripts for RMSE, bias and Taylor
 - **Samples and groups:** the full space-time sample, the spatial pattern of the climatology, per-time-step patterns and per-grid-point maps; per season (contiguous DJF), month or year
 - **Dask:** inputs stay lazy until compute, and one `dask.compute` call computes every metric and sample, so each input chunk is read once. Memory per task stays near the chunk size for every metric except Spearman r and NumPy-only custom metrics (see [Memory](#memory))
 - **Provenance:** software versions, input identity (path or URL, coordinate and value hashes, CMIP attributes such as `source_id`, `experiment_id`, `member_id`, `tracking_id`), every alignment step and a timestamp, as JSON
-- **Thresholds:** pass or fail limits on any value, for CI gates
+- **Thresholds and the CI gate:** pass or fail limits on any value; `climval check` runs the checks of a YAML or TOML file and exits with 0, 1 or 2; a GitHub Action writes the job summary and uploads the report
 - **Export:** HTML report, JSON and Markdown; tables in Jupyter
-- **CLI:** compare two datasets from the terminal
+- **CLI:** compare two datasets or run a configuration file from the terminal
 - **Extensible:** add your own metrics with `BaseMetric`
 
 ## Quickstart
 
 ```python
 import climval
-import xarray as xr
 
-era5 = xr.open_zarr("gs://.../era5_monthly.zarr")    # any lazy Dataset
-cmip = xr.open_dataset("tas_Amon_MPI-ESM1-2-HR_historical_r1i1p1f1_gn_185001-201412.nc", chunks={})
+reference, candidate = climval.demo_data()   # small synthetic fields, no download
 
 result = climval.compare(
-    era5,
-    cmip,
-    variable=("t2m", "tas"),                     # names differ between the datasets
+    reference,                   # 4 degree grid, -180..180, standard calendar, K
+    candidate,                   # 5 degree grid, 0..360, 360_day calendar, degC
+    variable="tas",
     region=climval.Box(lat=(35, 72), lon=(-10, 40)),
-    period=("1995", "2014"),
     by="season",
 )
 
 result.summary()                  # values and the alignment steps
 result.to_dataframe()             # long table: sample, group, metric, value, units
-result["rmse"]                    # one number: space-time sample, whole period
+result["rmse"]                    # one number: space_time sample, whole period
 result.check({"rmse": {"max": 2.0}, "pearson_r": {"min": 0.9, "sample": "climatology"}})
 result.export("report.html")      # or .json, .md
 ```
 
-Both datasets are compared on the coarser of the two grids by default (`target="coarser"`, common practice in PMP and ESMValTool), so a coarse model is not interpolated onto a fine reanalysis. Pass `target="reference"`, `target="candidate"` or a grid of your own to compare elsewhere. The grid chosen is recorded. The same call is available as an accessor: `cmip.climval.compare(era5, variable=("t2m", "tas"))`.
+The demo fields differ in grid, longitude convention, latitude order,
+calendar and units, so every alignment step has work to do. Results on them
+are flagged as synthetic in every output.
 
-To try climval without data, `climval.demo()` compares two synthetic fields on different grids, calendars and units. Its results are flagged as synthetic in every output.
+### On Pangeo data in the cloud
+
+ERA5 from Google's ARCO-ERA5 store against a CMIP6 model from the Pangeo
+catalogue, read anonymously (`pip install "climval[cloud,catalog]"`). One year
+reads about 150 MB:
+
+```python
+import intake
+import xarray as xr
+import climval
+
+era5 = xr.open_zarr(
+    "gs://gcp-public-data-arco-era5/ar/1959-2022-6h-240x121_equiangular_with_poles_conservative.zarr",
+    storage_options={"token": "anon"},
+    chunks={},
+)
+cat = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmip6.json")
+query = cat.search(source_id="MPI-ESM1-2-LR", experiment_id="historical", table_id="Amon",
+                   variable_id="tas", member_id="r1i1p1f1")
+cmip = query.to_dataset_dict(storage_options={"token": "anon"}, progressbar=False).popitem()[1]
+
+result = climval.compare(
+    era5,
+    cmip.squeeze(drop=True),              # drop the size-1 member_id and dcpp_init_year
+    variable=("2m_temperature", "tas"),
+    region=climval.Box(lat=(35, 72), lon=(-10, 40)),
+    period=("2014", "2014"),              # 6-hourly ERA5 is averaged to monthly means
+    by="season",
+    target="reference",                   # compare on the ERA5 grid
+)
+```
+
+`target` chooses the comparison grid: `"reference"`, `"candidate"`,
+`"coarser"` or a grid of your own. The same call is available as an accessor:
+`cmip.climval.compare(era5, variable=("2m_temperature", "tas"))`. The
+[examples](https://github.com/northflowlabs/climval/tree/main/examples) score
+five CMIP6 models against ERA5 in one call and run the CI gate on real data.
 
 ### How alignment works
 
@@ -97,7 +133,7 @@ pip install climval
 pip install "climval[cloud]"
 ```
 
-**Other extras:** `netcdf` (netCDF4, h5netcdf), `units` (pint, cf_xarray), `regions` (regionmask), `viz` (matplotlib, cartopy), `all` (everything above). `cftime` is kept as an extra that installs nothing new, because cftime is a core dependency. Conservative regridding needs xESMF, which depends on the ESMF library and is best installed with conda: `conda install -c conda-forge xesmf`.
+**Other extras:** `catalog` (intake-esm), `netcdf` (netCDF4, h5netcdf), `units` (pint, cf_xarray), `regions` (regionmask), `viz` (matplotlib, cartopy), `docs` (MkDocs Material), `all` (everything above except `docs`). `cftime` is kept as an extra that installs nothing new, because cftime is a core dependency. Conservative regridding needs xESMF, which depends on the ESMF library and is best installed with conda: `conda install -c conda-forge xesmf`.
 
 The lower bounds in `pyproject.toml` are tested in CI: one job installs every core dependency at exactly its lower bound on Python 3.10.
 
@@ -135,6 +171,51 @@ climval list-metrics
 climval list-presets
 climval info --model era5
 ```
+
+## CI gate
+
+A configuration file declares checks and limits:
+
+```yaml
+# climval.yml
+version: 1
+checks:
+  - name: europe-tas
+    reference: data/era5_t2m_monthly_europe.nc
+    candidate:
+      catalog: https://storage.googleapis.com/cmip6/pangeo-cmip6.json
+      query: {source_id: NorESM2-LM, experiment_id: historical, table_id: Amon,
+              variable_id: tas, member_id: r1i1p1f1}
+      storage_options: {token: anon}
+    variable: {reference: t2m, candidate: tas}
+    region: {lat: [35, 72], lon: [-10, 40]}
+    period: ["1995", "2014"]
+    by: season
+    thresholds:
+      mean_bias: {abs_max: 2.0, group: "*"}
+      pearson_r: {min: 0.95, sample: climatology}
+```
+
+```bash
+climval check climval.yml --output-dir climval-report
+```
+
+The command prints each limit with its value, writes a JSON result, a
+Markdown summary and an HTML report, and exits with **0** when every limit
+holds, **1** when a limit fails and **2** when the configuration or the data
+cannot be used. In GitHub Actions:
+
+```yaml
+- uses: northflowlabs/climval@v0.2.0
+  with:
+    config: climval.yml
+    version: "0.2.0"
+    extras: cloud,catalog
+```
+
+The action writes the summary to the job page and uploads the report as an
+artifact. See [Thresholds and the CI gate](https://northflowlabs.github.io/climval/how-to/ci-gate/)
+and [the GitHub Action](https://northflowlabs.github.io/climval/how-to/github-action/).
 
 ## Metrics
 
@@ -256,6 +337,7 @@ climval/
 │   └── engine.py       # samples and groups
 ├── provenance.py       # versions, input identity, hashes
 ├── thresholds.py       # pass or fail limits
+├── gate/               # climval check: configuration, runs, reports
 ├── accessor.py         # .climval accessor on DataArray and Dataset
 ├── core/               # 0.1 interface: load_model, BenchmarkSuite, reports
 ├── models/schema.py    # typed data models (CF convention)
@@ -280,6 +362,10 @@ It is configured through YAML recipes and installed through conda, which suits a
 
 [xskillscore](https://github.com/xarray-contrib/xskillscore) provides deterministic and probabilistic verification metrics on xarray objects. It expects inputs that are already aligned; climval does the alignment, and for the metrics both libraries have (RMSE, MAE, mean error, Pearson r, Spearman r) uses the same definitions, which the test suite checks against xskillscore.
 
+### ILAMB
+
+[ILAMB](https://www.ilamb.org/) benchmarks land models against a curated collection of observations with a scoring system (Collier et al. 2018).
+
 ### ClimateLearn
 
 [ClimateLearn](https://github.com/aditya-grover/climate-learn) is a Python library oriented toward machine learning pipelines for climate, providing standardized data loading and evaluation for ERA5 and CMIP6. Relevant if your workflow is ML-first.
@@ -292,8 +378,7 @@ climval sits at a different layer:
 |---|---|---|---|
 | Installation | Complex, conda-heavy | Moderate | `pip install climval` |
 | Configuration | YAML recipes | Config files | Pure Python API |
-| Learning curve | Days to weeks | Days | Minutes |
-| CI/CD integration | Difficult | Difficult | Native, with thresholds |
+| CI/CD integration | Not a design goal | Not a design goal | `climval check` and a GitHub Action |
 | Custom metrics | Recipe-based | Limited | `class MyMetric(BaseMetric)` |
 | Programmatic use | Partial | Partial | First-class, on xarray and dask |
 | Scope | Full diagnostic suite | Performance metrics | Aligned, recorded comparison of two datasets |

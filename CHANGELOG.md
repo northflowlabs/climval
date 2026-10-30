@@ -102,6 +102,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependency
 - CI job that installs every core dependency at its lower bound on
   Python 3.10 and runs the tests
+- `climval check CONFIG`: a validation gate for CI. A YAML, TOML or JSON
+  file declares checks (reference and candidate as paths, URLs or intake-esm
+  catalogue queries, variables, region, period, frequency, groups, regridding,
+  units, metrics, samples) and thresholds per metric, sample and group. The
+  file is validated before any data is opened. Output: console summary, JSON
+  result, Markdown summary for `$GITHUB_STEP_SUMMARY` (`--github-summary`)
+  and HTML report (`--output-dir`, `--json`, `--markdown`, `--html`). Exit
+  code 0 when every threshold holds, 1 on a threshold failure, 2 on a
+  configuration or data error. Also `--check NAME`, `--validate`, `--verbose`
+  and `--quiet`, and the Python API `climval.gate`
+- `ConfigError` for invalid configuration files
+- GitHub Action (`action.yml` in the repository root): installs climval
+  (`version`, `extras`), runs `climval check`, writes the job summary,
+  uploads the report as an artifact and gates the job (`fail-on`); outputs
+  `exit-code`, `status`, `report-dir` and `json`. The workflow
+  `.github/workflows/action.yml` exercises it on committed test data
+- `catalog` extra (intake-esm) and `docs` extra (MkDocs Material,
+  mkdocstrings, mkdocs-jupyter)
+- Documentation site at https://northflowlabs.github.io/climval/: getting
+  started, concepts with formulas, how-to guides, API reference and examples,
+  built strictly on every push and deployed from main
+- Examples on real open data, read anonymously from public cloud storage:
+  ERA5 (ARCO-ERA5) against five CMIP6 historical models from the Pangeo
+  catalogue over Europe, scored in one call with Taylor diagrams; and the CI
+  gate on ERA5 and two CMIP6 models over the AR6 Northern Europe land region
+- `CITATION.cff`, `.zenodo.json`, a code of conduct (Contributor Covenant
+  2.1), issue and pull request templates
 
 ### Changed
 - Without data, `BenchmarkSuite.run()` raises `ValueError` instead of scoring
@@ -127,6 +154,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `METRIC_REGISTRY` and available by name
 - `xarray`, `pandas`, `cftime` and `dask[array]` are core dependencies;
   timestamps in results are timezone aware (UTC)
+- `pyyaml` is a core dependency (and `tomli` on Python 3.10), for
+  `climval check` configuration files
+- `climval.cli.main` returns the exit code
+- The notebook `examples/cmip6_taylor_diagram.ipynb`, which scored synthetic
+  arrays through the 0.1 interface, is replaced by
+  `examples/era5_cmip6_europe.ipynb` on real ERA5 and CMIP6 data
 
 ### Migration from 0.1
 - Code that registered models with data files keeps working and now gets
