@@ -4,25 +4,37 @@ A *sample* says which points a number is computed over:
 
 ``space_time``
     Every valid point in space and time pooled, each weighted by its
-    spatial weight (cell area or cos latitude). One value per group.
+    spatial weight (cell area) times its time weight. One value per group.
 ``climatology``
     The spatial pattern of the time-mean fields: both inputs are averaged
-    over the (paired) time steps of the group first, then compared over
-    space with spatial weights. This is the usual Taylor diagram and
-    Gleckler et al. (2008) statistic. One value per group.
+    over the (paired) time steps of the group first, with time weights,
+    then compared over space with spatial weights. This is the usual Taylor
+    diagram and Gleckler et al. (2008) statistic. One value per group.
 ``space``
     The spatial pattern at each time step, giving a time series of values
     (dimension ``time``). Not grouped.
 ``time``
-    Temporal statistics at each grid point, every time step weighted
-    equally, giving maps (dimensions ``lat`` and ``lon``). One map per group.
+    Temporal statistics at each grid point, with time weights, giving maps
+    (dimensions ``lat`` and ``lon``). One map per group.
+
+Time weights: for monthly and yearly comparisons each time step counts in
+proportion to the length of its period in days (in the reference's
+calendar), the same weighting climval uses to aggregate months into years.
+Daily and sub-daily steps count equally.
 
 Groups come from ``by``: "season" (DJF, MAM, JJA, SON), "month" or "year".
-The group "all" holds the whole period and is always present.
+The group "all" holds the whole period and is always present. With
+``seasons="contiguous"`` (default) a December belongs to the following
+year's DJF, and a season of a given year counts only when all three of its
+months are present, so partial winters at the start and end of the period
+are left out (recorded in the provenance). ``seasons="calendar"`` keeps the
+0.2.0 behaviour: every December, January and February in the period form
+DJF, whether or not they belong to one winter.
 """
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from typing import Any
 
@@ -30,7 +42,7 @@ import numpy as np
 import xarray as xr
 
 from climval.errors import AlignmentError
-from climval.metrics.stats import BaseMetric
+from climval.metrics.stats import BaseMetric, wmean
 
 SAMPLES: dict[str, str] = {
     "space_time": "all valid points in space and time pooled, spatially weighted",
@@ -41,24 +53,57 @@ SAMPLES: dict[str, str] = {
 SCALAR_SAMPLES = ("space_time", "climatology")
 DEFAULT_SAMPLES = ("space_time", "climatology")
 GROUPINGS = ("season", "month", "year")
+SEASON_MODES = ("contiguous", "calendar")
 _SEASONS = ("DJF", "MAM", "JJA", "SON")
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
+_SEASON_MONTHS = {"DJF": {12, 1, 2}, "MAM": {3, 4, 5}, "JJA": {6, 7, 8}, "SON": {9, 10, 11}}
+
+
+def complete_seasons(time: xr.DataArray) -> tuple[np.ndarray, list[str]]:
+    """Mask of time steps in complete contiguous seasons, and the seasons left out.
+
+    A December belongs to the DJF of the following year. A season of a year
+    is complete when all three of its months are present.
+    """
+    labels = np.asarray(time.dt.season.values).astype(str)
+    month = np.asarray(time.dt.month.values)
+    syear = np.asarray(time.dt.year.values) + (month == 12)
+    keep = np.zeros(labels.size, dtype=bool)
+    dropped: list[str] = []
+    for name in _SEASONS:
+        for year in np.unique(syear[labels == name]):
+            idx = (labels == name) & (syear == year)
+            if set(month[idx].tolist()) == _SEASON_MONTHS[name]:
+                keep |= idx
+            else:
+                dropped.append(f"{name} {int(year)}")
+    return keep, dropped
+
+
 def make_groups(
-    time: xr.DataArray | None, by: str | None, frequency: str | None
+    time: xr.DataArray | None,
+    by: str | None,
+    frequency: str | None,
+    seasons: str = "contiguous",
 ) -> list[tuple[str, np.ndarray | None]]:
     groups: list[tuple[str, np.ndarray | None]] = [("all", None)]
     if by is None:
         return groups
     if by not in GROUPINGS:
         raise AlignmentError(f"by must be one of {GROUPINGS} or None, got {by!r}")
+    if seasons not in SEASON_MODES:
+        raise AlignmentError(f"seasons must be one of {SEASON_MODES}, got {seasons!r}")
     if time is None:
         raise AlignmentError(f"by={by!r} needs a time dimension")
     if by in ("season", "month") and frequency == "yearly":
         raise AlignmentError(f"by={by!r} needs monthly or finer data, the comparison is yearly")
     if by == "season":
         labels = np.asarray(time.dt.season.values).astype(str)
+        if seasons == "contiguous":
+            keep, _ = complete_seasons(time)
+            labels = np.where(keep, labels, "")
         order: Sequence[str] = _SEASONS
     elif by == "month":
         labels = np.asarray([_MONTHS[m - 1] for m in time.dt.month.values])
@@ -80,13 +125,18 @@ def _reduce_all(
     w: xr.DataArray,
     valid: xr.DataArray,
     dims: Sequence[str],
+    absolute_offset: float = 0.0,
 ) -> xr.Dataset:
     out: dict[str, xr.DataArray] = {}
     for m in metrics:
+        rr, cc = (r + absolute_offset, c + absolute_offset) if m.ratio_scale else (r, c)
         try:
-            value = m.reduce(r, c, w, list(dims))
+            value = m.reduce(rr, cc, w, list(dims))
         except Exception as exc:
-            raise type(exc)(f"metric {m.name!r} failed: {exc}") from exc
+            # Keep the original exception and its traceback; name the metric.
+            if sys.version_info >= (3, 11):
+                exc.add_note(f"climval: raised by metric {m.name!r} over dims {list(dims)}")
+            raise
         out[m.name] = value.reset_coords(drop=True) if isinstance(value, xr.DataArray) else value
     out["n_points"] = valid.sum(list(dims))
     return xr.Dataset(out)
@@ -102,19 +152,32 @@ def evaluate(
     samples: Sequence[str] = DEFAULT_SAMPLES,
     by: str | None = None,
     frequency: str | None = None,
+    *,
+    time_weights: xr.DataArray | None = None,
+    seasons: str = "contiguous",
+    absolute_offset: float = 0.0,
 ) -> dict[str, xr.Dataset]:
-    """Lazy metric values: a Dataset per sample, one variable per metric."""
+    """Lazy metric values: a Dataset per sample, one variable per metric.
+
+    ``time_weights`` (dim ``time``) weight each time step, ``absolute_offset``
+    is added to both inputs for metrics with ``ratio_scale`` (for example
+    273.15 for degC), see the module docstring for samples and groups.
+    """
     unknown = set(samples) - set(SAMPLES)
     if unknown:
         raise ValueError(f"Unknown samples {sorted(unknown)}; choose from {list(SAMPLES)}")
     spatial = list(spatial_dims)
     time_dims = ["time"] if has_time else []
-    groups = make_groups(reference["time"] if has_time else None, by, frequency)
+    groups = make_groups(reference["time"] if has_time else None, by, frequency, seasons)
 
-    def weights_for(valid: xr.DataArray, spatial_w: bool) -> xr.DataArray:
+    def weights_for(
+        valid: xr.DataArray, spatial_w: bool, tw: xr.DataArray | None
+    ) -> xr.DataArray:
         w = valid.astype(float)
         if spatial_w and spatial_weights is not None:
             w = w * spatial_weights
+        if tw is not None:
+            w = w * tw
         out: xr.DataArray = w
         return out
 
@@ -133,9 +196,15 @@ def evaluate(
                 continue
             r = reference if idx is None else reference.isel(time=idx)
             c = candidate if idx is None else candidate.isel(time=idx)
+            tw = None
+            if time_weights is not None and has_time:
+                tw = time_weights if idx is None else time_weights.isel(time=idx)
             if sample == "climatology" and has_time:
-                r = r.mean("time")
-                c = c.mean("time")
+                step_w = (r.notnull() & c.notnull()).astype(float)
+                if tw is not None:
+                    step_w = step_w * tw
+                r = wmean(r, step_w, ["time"])
+                c = wmean(c, step_w, ["time"])
                 valid = r.notnull() & c.notnull()
                 r, c = r.where(valid), c.where(valid)
             else:
@@ -146,8 +215,12 @@ def evaluate(
                 dims = spatial
             else:
                 dims = time_dims
-            w = weights_for(valid, spatial_w=sample != "time")
-            per_group.append(_reduce_all(metrics, r, c, w, valid, dims))
+            w = weights_for(
+                valid,
+                spatial_w=sample != "time",
+                tw=tw if sample in ("space_time", "time") else None,
+            )
+            per_group.append(_reduce_all(metrics, r, c, w, valid, dims, absolute_offset))
             names.append(name)
         if len(per_group) == 1:
             ds = per_group[0].expand_dims(group=names)

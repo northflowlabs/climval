@@ -91,6 +91,66 @@ class TestAgainstXskillscore:
         assert float(got) == pytest.approx(spearmanr(ref.values[ok], can.values[ok])[0], rel=1e-12)
 
 
+def _wm(x: np.ndarray, w: np.ndarray) -> float:
+    return float(np.sum(w * x) / np.sum(w))
+
+
+def _wsd(x: np.ndarray, w: np.ndarray) -> float:
+    return math.sqrt(_wm((x - _wm(x, w)) ** 2, w))
+
+
+def _wr(a: np.ndarray, b: np.ndarray, w: np.ndarray) -> float:
+    return _wm((a - _wm(a, w)) * (b - _wm(b, w)), w) / (_wsd(a, w) * _wsd(b, w))
+
+
+def _kge(r: np.ndarray, c: np.ndarray, w: np.ndarray) -> float:
+    a, b = _wsd(c, w) / _wsd(r, w), _wm(c, w) / _wm(r, w)
+    return 1 - math.sqrt((_wr(r, c, w) - 1) ** 2 + (a - 1) ** 2 + (b - 1) ** 2)
+
+
+def _tss(r: np.ndarray, c: np.ndarray, w: np.ndarray) -> float:
+    s = _wsd(c, w) / _wsd(r, w)
+    return 4 * (1 + _wr(r, c, w)) ** 4 / ((s + 1 / s) ** 2 * 16)
+
+
+# Independent NumPy definitions for the metrics xskillscore does not have.
+NUMPY_REFERENCES = {
+    "crmse": lambda r, c, w: math.sqrt(_wm(((c - _wm(c, w)) - (r - _wm(r, w))) ** 2, w)),
+    "nrmse": lambda r, c, w: math.sqrt(_wm((c - r) ** 2, w)) / _wsd(r, w),
+    "std_ratio": lambda r, c, w: _wsd(c, w) / _wsd(r, w),
+    "taylor_skill_score": _tss,
+    "kge": _kge,
+}
+
+
+class TestAgainstNumpy:
+    @pytest.mark.parametrize("n", [2, 7, 1000])
+    @pytest.mark.parametrize("name", sorted(NUMPY_REFERENCES))
+    def test_weighted_definitions(self, name: str, n: int) -> None:
+        rng = np.random.default_rng(n)
+        r = rng.normal(5, 2, n)
+        c = r * 0.8 + rng.normal(1, 1, n)
+        w = rng.uniform(0.1, 2, n)
+        got = get_metric(name).compute(r, c, w)
+        assert got == pytest.approx(NUMPY_REFERENCES[name](r, c, w), rel=1e-9)
+
+    @pytest.mark.parametrize("p", [5.0, 50.0, 95.0, 99.9])
+    def test_percentile_bias_unweighted_equals_numpy(self, p: float) -> None:
+        rng = np.random.default_rng(int(p))
+        r = rng.gamma(2.0, 2.0, 999) + 1.0
+        c = r * 1.05 + rng.normal(0, 0.1, r.size)
+        qr, qc = np.percentile(r, p), np.percentile(c, p)
+        got = PercentileBias(p).compute(r, c)
+        assert got == pytest.approx(100 * (qc - qr) / abs(qr), rel=1e-9)
+
+    def test_percentile_bias_integer_weights_equal_replication(self) -> None:
+        r = np.array([1.0, 2.0, 3.0, 4.0, 10.0])
+        w = np.array([1.0, 1.0, 1.0, 1.0, 3.0])
+        rr = np.repeat(r, w.astype(int))
+        m = PercentileBias(95)
+        assert m.compute(r, r + 1, w) == pytest.approx(m.compute(rr, rr + 1), rel=1e-12)
+
+
 class TestHandComputed:
     ref = np.array([1.0, 2.0, 3.0, 4.0])
     can = np.array([2.0, 2.0, 5.0, 3.0])

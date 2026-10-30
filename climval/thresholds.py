@@ -16,7 +16,9 @@ True
 
 Each limit may name ``sample`` (default "space_time") and ``group``
 (default "all"; "*" checks every group). A NaN value fails, because it
-cannot show that the limit holds.
+cannot show that the limit holds. Metrics may be named by the aliases
+:func:`climval.metrics.get_metric` accepts ("bias", "tss", "pearson" and so
+on); the checks report the metric's own name.
 """
 
 from __future__ import annotations
@@ -94,9 +96,12 @@ def evaluate_thresholds(
     comparison: Comparison, thresholds: Mapping[str, Mapping[str, Any]]
 ) -> ThresholdResult:
     """Check metric values against limits; see the module docstring."""
+    from climval.metrics.stats import canonical_name
+
     rows = comparison.rows()
     checks: list[ThresholdCheck] = []
-    for metric, spec in thresholds.items():
+    for given, spec in thresholds.items():
+        metric = canonical_name(given)
         limits = {k: float(spec[k]) for k in _LIMITS if k in spec}
         if not limits:
             raise ValueError(f"Threshold for {metric!r} needs one of {_LIMITS}")
@@ -114,7 +119,7 @@ def evaluate_thresholds(
         ]
         if not matched:
             raise ValueError(
-                f"No value for metric {metric!r}, sample {sample!r}, group {group!r} "
+                f"No value for metric {given!r}, sample {sample!r}, group {group!r} "
                 "in this comparison"
             )
         for r in matched:

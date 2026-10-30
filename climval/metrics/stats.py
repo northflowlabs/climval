@@ -13,7 +13,9 @@ Each metric is a :class:`BaseMetric` with two entry points:
 
 ``compute(reference, candidate, weights=None) -> float``
     The 0.1 NumPy interface, kept for existing code. It flattens both arrays,
-    drops points where either is not finite and calls ``reduce``.
+    drops points where either input or the weight is not finite, rejects
+    negative weights and calls ``reduce``. Since 0.2.0 weights are
+    normalised to sum to one over the valid points (see the CHANGELOG).
 
 Conventions used by every built-in metric:
 
@@ -22,6 +24,21 @@ Conventions used by every built-in metric:
   to sum to one over the valid points;
 * standard deviations are population values (ddof=0), which is what Taylor
   (2001) uses.
+
+Memory on dask arrays: every metric except Spearman r, percentile bias and
+metrics that implement only ``compute`` is a chunk-wise reduction. Spearman r
+and ``compute``-only metrics gather each sample into one chunk (the whole
+space-time sample for ``samples=("space_time",)``), so their memory grows with
+the sample. Percentile bias gathers a sample only when it fits in dask's
+``array.chunk-size`` (128 MiB by default) and otherwise uses a one-pass
+histogram estimate; see :class:`PercentileBias`.
+
+Kling-Gupta efficiency and percentile bias divide by the reference's mean or
+percentile, so they depend on where the unit scale has its zero.
+:func:`climval.compare` computes them on an absolute scale: temperatures in
+degC or degF are shifted to K (or Rankine, which gives the same ratios)
+for these two metrics only. ``BaseMetric.compute`` has no units and applies
+no shift.
 
 To add a metric, subclass :class:`BaseMetric` and implement ``reduce`` (works
 on dask) or only ``compute`` (NumPy; climval then gathers each sample into
@@ -36,6 +53,9 @@ References
 
 from __future__ import annotations
 
+import math
+import re
+import warnings
 from collections.abc import Sequence
 from typing import Any
 
@@ -79,11 +99,58 @@ def wcorr(a: xr.DataArray, b: xr.DataArray, w: xr.DataArray, dims: Sequence[str]
 
 
 def _gather(x: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
-    """Put ``dims`` in a single dask chunk (no-op for NumPy arrays)."""
+    """Put ``dims`` in a single dask chunk (no-op for NumPy arrays).
+
+    The other dimensions get dask's automatic chunk size, so a chunk holds
+    one full sample for as many kept points as fit in ``array.chunk-size``.
+    """
     if x.chunks is None:
         return x
-    out: xr.DataArray = x.chunk({d: -1 for d in dims})
+    spec: dict[str, Any] = {str(d): "auto" for d in x.dims if d not in dims}
+    spec.update({str(d): -1 for d in dims})
+    out: xr.DataArray = x.chunk(spec)
     return out
+
+
+def _stack(x: xr.DataArray, dims: Sequence[str], name: str) -> xr.DataArray:
+    """Stack ``dims`` into one dimension without building a pandas MultiIndex.
+
+    A MultiIndex would hold every sample point in memory as soon as the graph
+    is built (68 GiB for a year of hourly 0.25 degree data).
+    """
+    bare = x.reset_coords(drop=True).drop_vars([d for d in dims if d in x.coords])
+    out: xr.DataArray = bare.stack({name: list(dims)}, create_index=False)
+    return out
+
+
+def sample_bytes(x: xr.DataArray, dims: Sequence[str]) -> int:
+    """Bytes of one full sample over ``dims`` in float64."""
+    return int(math.prod(int(x.sizes[d]) for d in dims)) * 8
+
+
+def chunk_limit_bytes() -> int:
+    """dask's ``array.chunk-size`` in bytes (128 MiB when dask is not configured)."""
+    try:
+        import dask
+        from dask.utils import parse_bytes
+
+        return int(parse_bytes(dask.config.get("array.chunk-size")))
+    except Exception:  # noqa: BLE001
+        return 128 * 2**20
+
+
+def _warn_full_sample(name: str, x: xr.DataArray, dims: Sequence[str]) -> None:
+    if x.chunks is None:
+        return
+    nbytes = sample_bytes(x, dims)
+    if nbytes > chunk_limit_bytes():
+        warnings.warn(
+            f"Metric {name!r} gathers each sample into one dask chunk; here one sample "
+            f"over {list(dims)} is {nbytes / 2**30:.3g} GiB. Use the climatology or time "
+            "sample, a region or a period to keep it in memory.",
+            UserWarning,
+            stacklevel=4,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +169,12 @@ class BaseMetric:
     units_kind : str or None
         "data" (units of the variable), "dimensionless", "percent", or None.
     needs_full_sample : bool
-        True for rank and quantile metrics, which gather each sample into one
-        dask chunk when they are computed.
+        True for rank and quantile metrics, which need the whole sample at
+        once (see the module notes on memory).
+    ratio_scale : bool
+        True for metrics that divide by a reference value (KGE, percentile
+        bias). :func:`climval.compare` gives them temperatures on an
+        absolute scale.
     """
 
     name: str = "base"
@@ -111,6 +182,7 @@ class BaseMetric:
     higher_is_better: bool = False
     units_kind: str | None = None
     needs_full_sample: bool = False
+    ratio_scale: bool = False
 
     def reduce(
         self,
@@ -124,9 +196,10 @@ class BaseMetric:
             raise NotImplementedError(f"{type(self).__name__} must implement reduce or compute")
         dims = list(dims)
         stack = "_climval_sample"
-        r = _gather(reference.stack({stack: dims}), [stack])
-        c = _gather(candidate.stack({stack: dims}), [stack])
-        w = _gather(weights.broadcast_like(reference).stack({stack: dims}), [stack])
+        _warn_full_sample(self.name, reference, dims)
+        r = _gather(_stack(reference, dims, stack), [stack])
+        c = _gather(_stack(candidate, dims, stack), [stack])
+        w = _gather(_stack(weights.broadcast_like(reference), dims, stack), [stack])
 
         def _apply(rv: np.ndarray, cv: np.ndarray, wv: np.ndarray) -> float:
             ok = np.isfinite(rv) & np.isfinite(cv) & (wv > 0)
@@ -152,7 +225,12 @@ class BaseMetric:
         candidate: np.ndarray,
         weights: np.ndarray | None = None,
     ) -> float:
-        """Value for two NumPy arrays (flattened; non-finite pairs dropped)."""
+        """Value for two NumPy arrays.
+
+        Both are flattened; points where either value or the weight is not
+        finite are dropped; weights must not be negative and are normalised
+        to sum to one over the remaining points.
+        """
         if type(self).reduce is BaseMetric.reduce:
             raise NotImplementedError(f"{type(self).__name__} must implement reduce or compute")
         r = np.asarray(reference, dtype=float).ravel()
@@ -164,6 +242,8 @@ class BaseMetric:
             if weights is None
             else np.broadcast_to(np.asarray(weights, dtype=float), np.shape(reference)).ravel()
         )
+        if np.any(w < 0):
+            raise ValueError("weights must not be negative")
         ok = np.isfinite(r) & np.isfinite(c) & np.isfinite(w)
         w = np.where(ok, w, 0.0)
         dims = ("sample",)
@@ -355,9 +435,10 @@ class SpearmanCorrelation(BaseMetric):
         dims: Sequence[str],
     ) -> xr.DataArray:
         stack = "_climval_sample"
-        r = _gather(reference.stack({stack: list(dims)}), [stack])
-        c = _gather(candidate.stack({stack: list(dims)}), [stack])
-        w = weights.broadcast_like(reference).stack({stack: list(dims)})
+        _warn_full_sample(self.name, reference, dims)
+        r = _gather(_stack(reference, dims, stack), [stack])
+        c = _gather(_stack(candidate, dims, stack), [stack])
+        w = _gather(_stack(weights.broadcast_like(reference), dims, stack), [stack])
         return wcorr(_rank(r, stack), _rank(c, stack), w, [stack])
 
 
@@ -422,13 +503,15 @@ class KlingGuptaEfficiency(BaseMetric):
     KGE = 1 - sqrt((r - 1)**2 + (alpha - 1)**2 + (beta - 1)**2), with r the
     weighted Pearson correlation, alpha the standard deviation ratio and beta
     the ratio of weighted means (candidate over reference). beta depends on
-    the zero of the unit scale, so KGE is meaningful for ratio-scale
-    variables such as precipitation or runoff, not for temperature in degC.
+    the zero of the unit scale; :func:`climval.compare` computes KGE for
+    temperatures in degC or degF on the Kelvin scale. KGE was designed for
+    ratio-scale variables such as precipitation or runoff.
     """
 
     name = "kge"
     higher_is_better = True
     units_kind = "dimensionless"
+    ratio_scale = True
 
     def reduce(
         self,
@@ -446,23 +529,211 @@ class KlingGuptaEfficiency(BaseMetric):
         return kge.where((sr > 0) & (mr != 0))  # type: ignore[no-any-return]
 
 
+HIST_MANTISSA_BITS = 20
+"""Mantissa bits kept by the histogram quantile: bins are 2**-20 (about 1e-6) of the value wide."""
+_SHIFT = np.uint64(52 - HIST_MANTISSA_BITS)
+_SIGN = np.uint64(1 << 63)
+
+
+def _sortable(x: np.ndarray) -> np.ndarray:
+    """Map float64 to uint64 with the same order."""
+    u = np.ascontiguousarray(x, dtype=np.float64).view(np.uint64)
+    return np.where(u & _SIGN, ~u, u | _SIGN)
+
+
+def _unsortable(s: np.ndarray) -> np.ndarray:
+    s = np.asarray(s, dtype=np.uint64)
+    u = np.where(s & _SIGN, s & ~_SIGN, ~s)
+    return np.ascontiguousarray(u).view(np.float64)
+
+
+Partial = list[tuple[np.ndarray, np.ndarray]]
+
+
+def _hist_block(
+    r: np.ndarray,
+    c: np.ndarray,
+    w: np.ndarray,
+    kept_shape: tuple[int, ...],
+    kept_offset: tuple[int, ...],
+) -> Partial:
+    """Weighted sparse histograms of one block, keyed by (kept point, value bin)."""
+    nk = len(kept_shape)
+    block_kept = r.shape[:nk]
+    k = int(math.prod(block_kept))
+    r2, c2 = r.reshape(k, -1), c.reshape(k, -1)
+    w2 = np.broadcast_to(w, r.shape).reshape(k, -1)
+    if nk:
+        grids = np.meshgrid(
+            *[np.arange(n) + o for n, o in zip(block_kept, kept_offset, strict=True)],
+            indexing="ij",
+        )
+        flat = np.ravel_multi_index([g.ravel() for g in grids], kept_shape)
+    else:
+        flat = np.zeros(1, dtype=np.int64)
+    rows = np.broadcast_to(flat.astype(np.uint64)[:, None], r2.shape)
+    ok = np.isfinite(r2) & np.isfinite(c2) & np.isfinite(w2) & (w2 > 0)
+    out: Partial = []
+    for x in (r2, c2):
+        keys = (rows[ok] << np.uint64(32)) | (_sortable(x[ok]) >> _SHIFT)
+        uniq, inv = np.unique(keys, return_inverse=True)
+        out.append((uniq, np.bincount(inv.ravel(), weights=w2[ok], minlength=uniq.size)))
+    return out
+
+
+def _hist_merge(*parts: Partial) -> Partial:
+    out: Partial = []
+    for side in range(2):
+        keys = np.concatenate([p[side][0] for p in parts])
+        sums = np.concatenate([p[side][1] for p in parts])
+        uniq, inv = np.unique(keys, return_inverse=True)
+        out.append((uniq, np.bincount(inv.ravel(), weights=sums, minlength=uniq.size)))
+    return out
+
+
+def _hist_final(part: Partial, q: float, kept_shape: tuple[int, ...]) -> np.ndarray:
+    n = int(math.prod(kept_shape))
+    result = np.full((2, n), np.nan)
+    for side in range(2):
+        keys, sums = part[side]
+        point = (keys >> np.uint64(32)).astype(np.int64)
+        bins = keys & np.uint64(0xFFFFFFFF)
+        starts = np.searchsorted(point, np.arange(n), side="left")
+        stops = np.searchsorted(point, np.arange(n), side="right")
+        for i in range(n):
+            a, b = int(starts[i]), int(stops[i])
+            if a == b:
+                continue
+            cw = np.cumsum(sums[a:b])
+            total = float(cw[-1])
+            if total <= 0:
+                continue
+            target = q * total
+            j = min(int(np.searchsorted(cw, target, side="left")), b - a - 1)
+            before = float(cw[j - 1]) if j > 0 else 0.0
+            frac = 0.0 if sums[a + j] <= 0 else (target - before) / float(sums[a + j])
+            frac = min(max(frac, 0.0), 1.0)
+            lo = float(_unsortable(np.asarray([bins[a + j] << _SHIFT]))[0])
+            hi = float(_unsortable(np.asarray([(bins[a + j] + np.uint64(1)) << _SHIFT]))[0])
+            if not np.isfinite(hi) or hi < lo:
+                hi = lo
+            result[side, i] = lo + frac * (hi - lo)
+    return result.reshape((2, *kept_shape))
+
+
+def histogram_quantiles(
+    reference: xr.DataArray,
+    candidate: xr.DataArray,
+    weights: xr.DataArray,
+    dims: Sequence[str],
+    q: float,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Weighted quantiles of both inputs over ``dims`` in one pass over dask chunks.
+
+    Each chunk contributes a sparse weighted histogram whose bins keep the top
+    20 mantissa bits of each value; the histograms are summed in a tree, and
+    the quantile is the inverse of the weighted empirical distribution
+    function, interpolated linearly inside the bin where it falls. The bin
+    width bounds the error: at most 2**-20 (9.5e-7) of the quantile's
+    magnitude. Memory is bounded by the number of distinct bins, not by the
+    sample size.
+    """
+    import dask.array as dsa
+    from dask.delayed import delayed
+
+    dims = list(dims)
+    kept = [str(d) for d in reference.dims if d not in dims]
+    w = weights.broadcast_like(reference)
+    arrays = [x.transpose(*kept, *dims) for x in (reference, candidate, w)]
+    template = next(x for x in arrays if x.chunks is not None)
+    arrays = [x if x.chunks is not None else x.chunk(template.chunksizes) for x in arrays]
+    r, c, wb = xr.unify_chunks(*arrays)
+    kept_shape = tuple(int(r.sizes[d]) for d in kept)
+    assert r.chunks is not None
+    offsets = [np.concatenate([[0], np.cumsum(ch[:-1])]).astype(int) for ch in r.chunks]
+    blocks = [x.data.to_delayed(optimize_graph=False) for x in (r, c, wb)]
+    block_fn = delayed(_hist_block, pure=True)
+    parts = [
+        block_fn(
+            blocks[0][idx],
+            blocks[1][idx],
+            blocks[2][idx],
+            kept_shape,
+            tuple(int(offsets[a][idx[a]]) for a in range(len(kept))),
+        )
+        for idx in np.ndindex(blocks[0].shape)
+    ]
+    merge_fn = delayed(_hist_merge, pure=True)
+    while len(parts) > 1:
+        parts = [merge_fn(*parts[i : i + 8]) for i in range(0, len(parts), 8)]
+    final = delayed(_hist_final, pure=True)(parts[0], q, kept_shape)
+    data = dsa.from_delayed(final, shape=(2, *kept_shape), dtype=float)  # type: ignore[no-untyped-call]
+    coords = {d: r[d].values for d in kept if d in r.coords}
+    both = xr.DataArray(data, dims=("_side", *kept), coords=coords)
+    return both.isel(_side=0, drop=True), both.isel(_side=1, drop=True)
+
+
+def _percentile_label(percentile: float) -> str:
+    p = float(percentile)
+    return f"p{int(p)}" if p.is_integer() else "p" + f"{p:g}".replace(".", "_")
+
+
 class PercentileBias(BaseMetric):
     """Percentile bias: relative difference of a weighted percentile, in percent.
 
-    100 * (Q_c - Q_r) / |Q_r|, with Q the weighted percentile of each sample
-    (xarray weighted quantile, which equals NumPy's linear method for equal
-    weights). NaN when Q_r is 0. Being relative to the reference value, it
-    depends on the unit's zero: use Kelvin, not degC, for temperature.
+    100 * (Q_c - Q_r) / |Q_r|, with Q the weighted percentile of each sample.
+    NaN when Q_r is 0. Being relative to the reference value, it depends on
+    the unit's zero; :func:`climval.compare` computes it for temperatures in
+    degC or degF on the Kelvin scale.
+
+    Two ways to get Q, chosen per sample with ``method="auto"``:
+
+    ``"exact"``
+        xarray's weighted quantile (equal to NumPy's linear method for equal
+        weights) on the whole sample, gathered into one dask chunk.
+    ``"histogram"``
+        :func:`histogram_quantiles`, one pass over the chunks with memory
+        bounded by the number of distinct value bins. Its error is at most
+        2**-20 of the quantile's magnitude plus the difference between the
+        weighted empirical distribution function and the linear method,
+        which is below one spacing between neighbouring sorted values.
+
+    ``"auto"`` (default) uses ``"exact"`` for NumPy arrays and for dask
+    samples of at most ``max_exact_bytes`` (default: dask's
+    ``array.chunk-size``, 128 MiB, which is 16.8 million float64 values),
+    and ``"histogram"`` above that. The method used is recorded in the
+    provenance under ``metric_methods``.
     """
 
     name = "percentile_bias"
     higher_is_better = False
     units_kind = "percent"
     needs_full_sample = True
+    ratio_scale = True
 
-    def __init__(self, percentile: float = 95.0) -> None:
-        self.percentile = percentile
-        self.name = f"percentile_bias_p{int(percentile)}"
+    def __init__(
+        self,
+        percentile: float = 95.0,
+        method: str = "auto",
+        max_exact_bytes: int | None = None,
+    ) -> None:
+        if not 0.0 <= float(percentile) <= 100.0:
+            raise ValueError(f"percentile must be between 0 and 100, got {percentile}")
+        if method not in ("auto", "exact", "histogram"):
+            raise ValueError(f"method must be 'auto', 'exact' or 'histogram', got {method!r}")
+        self.percentile = float(percentile)
+        self.method = method
+        self.max_exact_bytes = max_exact_bytes
+        self.name = f"percentile_bias_{_percentile_label(percentile)}"
+
+    def method_for(self, reference: xr.DataArray, dims: Sequence[str]) -> str:
+        """The method ``reduce`` uses for this sample."""
+        if self.method != "auto":
+            return self.method
+        if reference.chunks is None:
+            return "exact"
+        limit = self.max_exact_bytes if self.max_exact_bytes is not None else chunk_limit_bytes()
+        return "exact" if sample_bytes(reference, dims) <= limit else "histogram"
 
     def reduce(
         self,
@@ -472,12 +743,21 @@ class PercentileBias(BaseMetric):
         dims: Sequence[str],
     ) -> xr.DataArray:
         q = self.percentile / 100.0
-        w = _gather(weights.broadcast_like(reference), dims)
-        qr = _gather(reference, dims).weighted(w).quantile(q, dim=list(dims))
-        qc = _gather(candidate, dims).weighted(w).quantile(q, dim=list(dims))
-        qr = qr.drop_vars("quantile", errors="ignore")
-        qc = qc.drop_vars("quantile", errors="ignore")
+        dims = list(dims)
+        method = self.method_for(reference, dims)
+        if method == "histogram" and (reference.chunks is not None or candidate.chunks is not None):
+            qr, qc = histogram_quantiles(reference, candidate, weights, dims, q)
+        elif method == "histogram":
+            ref_d = reference.chunk({d: -1 for d in reference.dims})
+            qr, qc = histogram_quantiles(ref_d, candidate, weights, dims, q)
+        else:
+            w = _gather(weights.broadcast_like(reference), dims)
+            qr = _gather(reference, dims).weighted(w).quantile(q, dim=dims)
+            qc = _gather(candidate, dims).weighted(w).quantile(q, dim=dims)
+            qr = qr.drop_vars("quantile", errors="ignore")
+            qc = qc.drop_vars("quantile", errors="ignore")
         out: xr.DataArray = ((qc - qr) / abs(qr) * 100.0).where(qr != 0)
+        out.attrs["climval_method"] = method
         return out
 
 
@@ -514,14 +794,37 @@ _ALIASES = {
 }
 
 
+_PERCENTILE_NAME = re.compile(r"^percentile_bias_p(\d+(?:[._]\d+)?)$")
+
+
 def get_metric(name: str) -> BaseMetric:
-    """Metric by name. 'percentile_bias_p<N>' builds a percentile bias for any N."""
+    """Metric by name or alias.
+
+    'percentile_bias_p<N>' builds a percentile bias for any N from 0 to 100;
+    write a decimal point as '_' or '.': 'percentile_bias_p99_9' is the
+    99.9th percentile (its name is 'percentile_bias_p99_9').
+    """
     key = _ALIASES.get(name, name)
     if key in METRIC_REGISTRY:
         return METRIC_REGISTRY[key]
-    if key.startswith("percentile_bias_p") and key[len("percentile_bias_p") :].isdigit():
-        return PercentileBias(float(key[len("percentile_bias_p") :]))
+    match = _PERCENTILE_NAME.match(key)
+    if match:
+        value = float(match.group(1).replace("_", "."))
+        if value > 100.0:
+            raise ValueError(
+                f"Unknown metric '{name}': percentiles run from 0 to 100; write 99.9 as "
+                "'percentile_bias_p99_9'"
+            )
+        return PercentileBias(value)
     raise ValueError(f"Unknown metric '{name}'. Available: {list(METRIC_REGISTRY.keys())}")
+
+
+def canonical_name(name: str) -> str:
+    """The result name of a metric given by name or alias (unknown names unchanged)."""
+    try:
+        return get_metric(name).name
+    except ValueError:
+        return name
 
 
 def resolve_metrics(metrics: Sequence[str | BaseMetric] | None) -> list[BaseMetric]:
