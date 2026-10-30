@@ -7,7 +7,7 @@ Zenodo with a DOI.
 
 ```bibtex
 @software{climval,
-  author    = {Pedersen, Tom Danny S. and {Northflow Technologies AS}},
+  author    = {Pedersen, Tom Danny and {Northflow Technologies AS}},
   title     = {climval: validation of climate model output against reference data},
   version   = {0.2.0},
   year      = {2026},

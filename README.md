@@ -135,7 +135,7 @@ pip install climval
 pip install "climval[cloud]"
 ```
 
-**Other extras:** `catalog` (intake-esm), `netcdf` (netCDF4, h5netcdf), `units` (pint, cf_xarray), `regions` (regionmask), `viz` (matplotlib, cartopy), `docs` (MkDocs Material), `all` (everything above except `docs`). `cftime` is kept as an extra that installs nothing new, because cftime is a core dependency. Conservative regridding needs xESMF, which depends on the ESMF library and is best installed with conda: `conda install -c conda-forge xesmf`.
+**Other extras:** `catalog` (intake-esm), `netcdf` (netCDF4, h5netcdf), `units` (pint, cf_xarray), `regions` (regionmask), `docs` (MkDocs Material), `all` (everything above except `docs`). `cftime` is kept as an extra that installs nothing new, because cftime is a core dependency. Conservative regridding needs xESMF, which depends on the ESMF library and is best installed with conda: `conda install -c conda-forge xesmf`.
 
 The lower bounds in `pyproject.toml` are tested in CI: one job installs every core dependency at exactly its lower bound on Python 3.10.
 

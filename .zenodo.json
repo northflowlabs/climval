@@ -4,7 +4,7 @@
   "description": "<p>climval is a Python library that validates climate model output against reference data. It aligns the two datasets in space, time and units (coordinates, longitude convention, regions, calendars, frequencies, regridding, unit conversion, paired missing values and cell-area weights), computes weighted metrics with xarray, lazily on dask arrays, records the provenance of every value, and gates continuous integration on thresholds with the climval check command and a GitHub Action.</p>",
   "creators": [
     {
-      "name": "Pedersen, Tom Danny S.",
+      "name": "Pedersen, Tom Danny",
       "affiliation": "Northflow Technologies AS"
     },
     {

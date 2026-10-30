@@ -9,7 +9,7 @@ pip install "climval[cloud,catalog]"     # plus intake-esm catalogues
 ```
 
 Other extras: `netcdf` (netCDF4, h5netcdf), `units` (pint, cf_xarray),
-`regions` (regionmask), `viz` (matplotlib, cartopy), `all`. Conservative
+`regions` (regionmask), `all`. Conservative
 regridding needs xESMF, which depends on the ESMF library and is best
 installed with conda: `conda install -c conda-forge xesmf`.
 

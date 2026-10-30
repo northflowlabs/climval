@@ -110,6 +110,26 @@ Add a new entry to `_PRESETS` in `climval/core/loader.py`:
 - [ ] Docs build (`mkdocs build --strict`)
 - [ ] CHANGELOG.md updated
 
+## Releasing
+
+1. Set the version in `pyproject.toml`.
+2. In `CHANGELOG.md`, replace `Unreleased` in the version's heading with the
+   release date: `## [0.2.0] - YYYY-MM-DD`.
+3. In `CITATION.cff`, set `version` to the same version and `date-released`
+   to the same date (`date-released: 2026-11-02`, for example), then check
+   the file with `cffconvert --validate`.
+4. Set the version in `recipe/recipe.yaml`; its `sha256` is filled in from
+   the sdist once it is on PyPI.
+5. Commit, then tag and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+
+The tag starts `.github/workflows/publish.yml`. It stops before building if
+the tag does not match the package version, if the changelog heading has no
+date, or if `CITATION.cff` has the wrong version or no `date-released`. It
+then tests, builds and publishes to PyPI (trusted publishing), and finally
+creates the GitHub Release for the tag with the tag's `CHANGELOG.md` section
+as the notes, unless a release for the tag already exists. Zenodo archives
+each GitHub Release and mints its DOI.
+
 ## Commit style
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/):

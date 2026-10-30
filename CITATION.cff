@@ -11,7 +11,7 @@ abstract: >-
   provenance of every value, and gates continuous integration on thresholds
   with the climval check command and a GitHub Action.
 authors:
-  - given-names: "Tom Danny S."
+  - given-names: "Tom Danny"
     family-names: Pedersen
     email: tdp@northflow.no
     affiliation: Northflow Technologies AS

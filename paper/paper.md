@@ -9,7 +9,7 @@ tags:
   - CMIP6
   - Pangeo
 authors:
-  - name: Tom Danny S. Pedersen
+  - name: Tom Danny Pedersen
     affiliation: 1
     corresponding: true
 affiliations:

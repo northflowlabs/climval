@@ -107,7 +107,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   catalogue queries, variables, region, period, frequency, `min_coverage`,
   groups, `seasons`, regridding, target grid, units, weights, metrics,
   samples) and thresholds per metric, sample and group; metrics may be named
-  by their aliases. The file is validated before any data is opened. Output:
+  by their aliases. The file is validated before any data is opened,
+  including the limits (finite numbers, `min` not above `max`, `abs_max` not
+  negative; numeric strings such as `"1e-3"` are read as numbers) and the
+  groups, which must be ones the check's `by` produces. A check without
+  thresholds is a configuration error. Inputs shared by checks are opened
+  once per run. Output:
   console summary, JSON
   result, Markdown summary for `$GITHUB_STEP_SUMMARY` (`--github-summary`)
   and HTML report (`--output-dir`, `--json`, `--markdown`, `--html`). Exit
@@ -118,8 +123,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Action (`action.yml` in the repository root): installs climval
   (`version`, `extras`), runs `climval check`, writes the job summary,
   uploads the report as an artifact and gates the job (`fail-on`); outputs
-  `exit-code`, `status`, `report-dir` and `json`. The workflow
-  `.github/workflows/action.yml` exercises it on committed test data
+  `exit-code`, `status`, `report-dir` and `json`. Used at a release tag
+  (`@v0.2.0`), it installs the same climval version unless `version` says
+  otherwise. The workflow `.github/workflows/action.yml` exercises it on
+  committed test data
 - `catalog` extra (intake-esm) and `docs` extra (MkDocs Material,
   mkdocstrings, mkdocs-jupyter)
 - Documentation site at https://northflowlabs.github.io/climval/: getting
@@ -160,6 +167,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyyaml` is a core dependency (and `tomli` on Python 3.10), for
   `climval check` configuration files
 - `climval.cli.main` returns the exit code
+- The `viz` extra (matplotlib, cartopy) is removed: no part of climval
+  imports either. The package metadata give the licence as the SPDX
+  expression `Apache-2.0` (PEP 639), which needs setuptools 77 or later to
+  build
 - The notebook `examples/cmip6_taylor_diagram.ipynb`, which scored synthetic
   arrays through the 0.1 interface, is replaced by
   `examples/era5_cmip6_europe.ipynb` on real ERA5 and CMIP6 data

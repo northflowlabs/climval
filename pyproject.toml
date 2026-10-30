@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "climval"
 version = "0.2.0"
 description = "Validate climate model output against reference data, aligned in space, time and units"
 authors = [{ name = "Northflow Technologies AS", email = "hello@northflow.no" }]
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.10"
 keywords = [
@@ -18,7 +19,6 @@ keywords = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -65,7 +65,6 @@ regions = ["regionmask>=0.11"]
 cftime  = ["cftime>=1.6"]
 # intake-esm catalogues (for example the Pangeo CMIP6 catalogue) as inputs.
 catalog = ["intake-esm>=2023.6"]
-viz     = ["matplotlib>=3.7", "cartopy>=0.21"]
 all = [
     "netCDF4>=1.6",
     "h5netcdf>=1.1",
@@ -80,12 +79,10 @@ all = [
     "cf_xarray>=0.8",
     "regionmask>=0.11",
     "cftime>=1.6",
-    "matplotlib>=3.7",
-    "cartopy>=0.21",
     "intake-esm>=2023.6",
 ]
 docs = [
-    "mkdocs>=1.6",
+    "mkdocs>=1.6,<2",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.26",
     "mkdocs-jupyter>=0.25",
