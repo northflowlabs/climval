@@ -150,8 +150,12 @@ runs:
         # shellcheck disable=SC2206
         cmd+=($CLIMVAL_ARGS)
         set +f
+        # GitHub runs bash with -e; a threshold failure (exit 1) must not end
+        # the step before the exit code is recorded.
+        set +e
         "${cmd[@]}"
         code=$?
+        set -e
         case "$code" in
           0) status=pass ;;
           1) status=fail ;;
