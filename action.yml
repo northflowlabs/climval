@@ -1,0 +1,163 @@
+name: climval check
+description: >-
+  Validate climate model output against reference data with climval and gate
+  the job on thresholds. Writes a job summary and uploads the report.
+author: Northflow Technologies AS
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  config:
+    description: Path to the climval check configuration (.yml, .yaml, .toml or .json).
+    required: true
+  version:
+    description: >-
+      climval version to install from PyPI, for example "0.2.0". "latest" installs
+      the newest release. "source" installs climval from this action's own
+      checkout, so the action and the package come from the same ref.
+    required: false
+    default: latest
+  extras:
+    description: >-
+      Comma-separated pip extras, for example "cloud,catalog" for Zarr in cloud
+      storage and intake-esm catalogues.
+    required: false
+    default: ""
+  python-version:
+    description: Python version for actions/setup-python. Empty skips setup-python.
+    required: false
+    default: "3.12"
+  checks:
+    description: Space-separated check names to run. Empty runs every check.
+    required: false
+    default: ""
+  args:
+    description: Further arguments for climval check, for example "--verbose".
+    required: false
+    default: ""
+  report-dir:
+    description: Directory for climval-check.json, .md and .html.
+    required: false
+    default: climval-report
+  job-summary:
+    description: Write the Markdown summary to the job summary ("true" or "false").
+    required: false
+    default: "true"
+  upload-report:
+    description: Upload the report directory as a workflow artifact ("true" or "false").
+    required: false
+    default: "true"
+  artifact-name:
+    description: Name of the uploaded artifact.
+    required: false
+    default: climval-report
+  fail-on:
+    description: >-
+      When the step fails. "threshold" fails on a threshold failure or an error
+      (exit codes 1 and 2), "error" only on a configuration or data error (exit
+      code 2), "never" never fails; read the exit-code output instead.
+    required: false
+    default: threshold
+
+outputs:
+  exit-code:
+    description: Exit code of climval check. 0 passed, 1 threshold failure, 2 configuration or data error.
+    value: ${{ steps.check.outputs.exit-code }}
+  status:
+    description: pass, fail or error.
+    value: ${{ steps.check.outputs.status }}
+  report-dir:
+    description: Directory holding the report files.
+    value: ${{ steps.check.outputs.report-dir }}
+  json:
+    description: Path to the JSON result.
+    value: ${{ steps.check.outputs.json }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      if: inputs.python-version != ''
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install climval
+      shell: bash
+      env:
+        CLIMVAL_VERSION: ${{ inputs.version }}
+        CLIMVAL_EXTRAS: ${{ inputs.extras }}
+        CLIMVAL_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        extras=""
+        if [ -n "${CLIMVAL_EXTRAS// /}" ]; then
+          extras="[${CLIMVAL_EXTRAS// /}]"
+        fi
+        case "$CLIMVAL_VERSION" in
+          source) spec="${CLIMVAL_ACTION_PATH}${extras}" ;;
+          latest|"") spec="climval${extras}" ;;
+          *) spec="climval${extras}==${CLIMVAL_VERSION}" ;;
+        esac
+        python -m pip install --upgrade pip
+        python -m pip install "$spec"
+        climval --help > /dev/null
+        python -c "import climval; print('climval', climval.__version__)"
+
+    - name: Run climval check
+      id: check
+      shell: bash
+      env:
+        CLIMVAL_CONFIG: ${{ inputs.config }}
+        CLIMVAL_CHECKS: ${{ inputs.checks }}
+        CLIMVAL_ARGS: ${{ inputs.args }}
+        CLIMVAL_REPORT_DIR: ${{ inputs.report-dir }}
+        CLIMVAL_JOB_SUMMARY: ${{ inputs.job-summary }}
+      run: |
+        set -uo pipefail
+        cmd=(climval check "$CLIMVAL_CONFIG" --output-dir "$CLIMVAL_REPORT_DIR")
+        if [ "$CLIMVAL_JOB_SUMMARY" = "true" ]; then
+          cmd+=(--github-summary)
+        fi
+        for name in $CLIMVAL_CHECKS; do
+          cmd+=(--check "$name")
+        done
+        # Word splitting of the free-form arguments is intended.
+        # shellcheck disable=SC2206
+        cmd+=($CLIMVAL_ARGS)
+        "${cmd[@]}"
+        code=$?
+        case "$code" in
+          0) status=pass ;;
+          1) status=fail ;;
+          *) status=error ;;
+        esac
+        {
+          echo "exit-code=$code"
+          echo "status=$status"
+          echo "report-dir=$CLIMVAL_REPORT_DIR"
+          echo "json=$CLIMVAL_REPORT_DIR/climval-check.json"
+        } >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Upload the report
+      if: always() && inputs.upload-report == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.report-dir }}
+        if-no-files-found: warn
+
+    - name: Gate the job
+      shell: bash
+      env:
+        CLIMVAL_EXIT: ${{ steps.check.outputs.exit-code }}
+        CLIMVAL_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        case "$CLIMVAL_FAIL_ON" in
+          never) exit 0 ;;
+          error) [ "$CLIMVAL_EXIT" -ge 2 ] && { echo "climval check: configuration or data error"; exit "$CLIMVAL_EXIT"; } ; exit 0 ;;
+          threshold) [ "$CLIMVAL_EXIT" -ne 0 ] && { echo "climval check failed with exit code $CLIMVAL_EXIT"; exit "$CLIMVAL_EXIT"; } ; exit 0 ;;
+          *) echo "fail-on must be threshold, error or never, got '$CLIMVAL_FAIL_ON'"; exit 2 ;;
+        esac

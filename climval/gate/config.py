@@ -216,7 +216,7 @@ def load_config(path: str | os.PathLike[str]) -> GateConfig:
         raise ConfigError(f"{p}: the file is not UTF-8 text") from None
     data = _parse_text(text, p.suffix.lower(), str(p))
     config = parse_config(data, base_dir=p.parent)
-    config.path = str(p)
+    config.path = os.fspath(path)
     config.sha256 = hashlib.sha256(raw).hexdigest()
     return config
 

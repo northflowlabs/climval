@@ -1,0 +1,80 @@
+name: Action
+
+# Exercises the climval check action in this repository (uses: ./) on the
+# small committed test data in tests/data/gate. The data are synthetic.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pass:
+    name: Passing check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: climval check
+        id: climval
+        uses: ./
+        with:
+          config: tests/data/gate/pass.yml
+          version: source
+          artifact-name: climval-report-pass-${{ matrix.os }}
+      - name: Outputs are as expected
+        shell: bash
+        run: |
+          test "${{ steps.climval.outputs.exit-code }}" = "0"
+          test "${{ steps.climval.outputs.status }}" = "pass"
+          test -s "${{ steps.climval.outputs.json }}"
+          test -s "${{ steps.climval.outputs.report-dir }}/climval-check.md"
+          test -s "${{ steps.climval.outputs.report-dir }}/climval-check.html"
+          python -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['passed'] and d['counts']['pass'] == 2" "${{ steps.climval.outputs.json }}"
+
+  fail:
+    name: Threshold failure gates the job
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: climval check (expected to fail)
+        id: climval
+        continue-on-error: true
+        uses: ./
+        with:
+          config: tests/data/gate/fail.yml
+          version: source
+          artifact-name: climval-report-fail
+      - name: The step failed with exit code 1
+        shell: bash
+        run: |
+          test "${{ steps.climval.outcome }}" = "failure"
+          test "${{ steps.climval.outputs.exit-code }}" = "1"
+          test "${{ steps.climval.outputs.status }}" = "fail"
+
+  error:
+    name: Data error reports exit code 2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: climval check (missing file, not gating)
+        id: climval
+        uses: ./
+        with:
+          config: tests/data/gate/error.yml
+          version: source
+          fail-on: never
+          upload-report: "false"
+      - name: The step passed and reported exit code 2
+        shell: bash
+        run: |
+          test "${{ steps.climval.outputs.exit-code }}" = "2"
+          test "${{ steps.climval.outputs.status }}" = "error"
