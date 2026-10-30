@@ -117,11 +117,34 @@ def test_threshold_forms_normalise() -> None:
         ({"variable": ["t2m", "tas"]}, "variable mapping|a variable is"),
         ({"units": "kelvin"}, "convert"),
         ({"names": ["only one"]}, "names"),
+        ({"min_coverage": 0}, "min_coverage"),
+        ({"min_coverage": 1.5}, "min_coverage"),
+        ({"min_coverage": "all"}, "min_coverage"),
+        ({"seasons": "meteorological"}, "seasons"),
+        ({"target": "finer"}, "target"),
     ],
 )
 def test_invalid_check_options(change: dict[str, Any], message: str) -> None:
     with pytest.raises(ConfigError, match=message):
         parse_config(_base(**change))
+
+
+def test_engine_options_pass_through(gate_dir: Path) -> None:
+    cfg = parse_config(
+        _base(
+            min_coverage=1, seasons="calendar", target="reference", weights="cos_lat", by="season"
+        ),
+        base_dir=gate_dir,
+    )
+    options = cfg.checks[0].options
+    assert options["min_coverage"] == 1.0
+    assert options["seasons"] == "calendar"
+    report = run(cfg)
+    assert report.exit_code == EXIT_PASS, report.outcomes[0].error
+    comparison = report.outcomes[0].comparison
+    assert comparison is not None
+    assert comparison.provenance["options"]["min_coverage"] == 1.0
+    assert comparison.provenance["options"]["seasons"] == "calendar"
 
 
 @pytest.mark.parametrize(

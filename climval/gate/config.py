@@ -48,7 +48,9 @@ CHECK_OPTIONS = (
     "region",
     "period",
     "freq",
+    "min_coverage",
     "by",
+    "seasons",
     "regrid",
     "target",
     "time",
@@ -81,6 +83,7 @@ THRESHOLD_KEYS = frozenset({"metric", "sample", "group", *LIMIT_KEYS})
 
 _CHOICES: dict[str, tuple[Any, ...]] = {
     "by": ("season", "month", "year", None),
+    "seasons": ("contiguous", "calendar"),
     "regrid": ("bilinear", "nearest", "conservative"),
     "target": ("reference", "candidate", "coarser"),
     "time": ("intersect", "exact"),
@@ -479,6 +482,12 @@ def _parse_check(item: Mapping[str, Any], where: str, base: Path | None, index: 
             except AlignmentError as exc:
                 raise ConfigError(f"{loc}: {exc}") from None
             value = str(value)
+        elif key == "min_coverage":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ConfigError(f"{loc}: must be a number in (0, 1], got {value!r}")
+            if not 0 < value <= 1:
+                raise ConfigError(f"{loc}: must be in (0, 1], got {value!r}")
+            value = float(value)
         elif key == "units":
             if isinstance(value, Mapping):
                 _no_unknown(value, frozenset({"reference", "candidate"}), loc)

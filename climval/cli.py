@@ -102,6 +102,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         min_coverage=args.min_coverage,
         units=args.units,
         by=args.by,
+        seasons=args.seasons,
         metrics=args.metrics or None,
     )
     result.summary()
@@ -301,6 +302,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cmp_p.add_argument("--units", default="convert", choices=["convert", "strict", "ignore"])
     cmp_p.add_argument("--by", default=None, choices=["season", "month", "year"])
+    cmp_p.add_argument(
+        "--seasons",
+        default="contiguous",
+        choices=["contiguous", "calendar"],
+        help="contiguous (default): December counts in the following DJF, incomplete "
+        "seasons are left out; calendar: every Dec, Jan and Feb form DJF",
+    )
     cmp_p.add_argument("--metrics", nargs="*", default=None)
     cmp_p.add_argument("--output", default=None, help="Output path (.html/.json/.md)")
     cmp_p.set_defaults(func=cmd_compare)

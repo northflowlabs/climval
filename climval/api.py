@@ -83,8 +83,8 @@ def compare(
         only option for curvilinear grids, and the only one that averages a
         fine grid over coarse cells).
     target
-        Grid to compare on: "coarser" (default since 0.2.0, the grid with the
-        larger cells), "reference", "candidate", or an xarray object holding
+        Grid to compare on: "coarser" (default: the grid with the larger
+        cells), "reference", "candidate", or an xarray object holding
         the target grid. With station data the stations are the target.
     time
         "intersect" (default) keeps the periods present in both;
@@ -115,8 +115,9 @@ def compare(
         None, "season", "month" or "year": add per-group values.
     seasons
         "contiguous" (default): December belongs to the following year's
-        DJF and incomplete seasons are left out. "calendar": the 0.2.0
-        behaviour, every December, January and February form DJF.
+        DJF and incomplete seasons are left out. "calendar": every
+        December, January and February in the period form DJF, as in
+        xarray's ``time.season`` grouping.
     metrics
         Names or BaseMetric instances. Defaults to
         :data:`climval.metrics.DEFAULT_METRICS`.

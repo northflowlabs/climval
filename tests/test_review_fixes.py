@@ -6,6 +6,7 @@ C critical, M major, N minor) and checks the corrected behaviour.
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 import tracemalloc
@@ -681,6 +682,17 @@ class TestCliRegion:
         can.to_dataset().to_netcdf(tmp_path / "can.nc")
         main(["compare", str(tmp_path / "ref.nc"), str(tmp_path / "can.nc"), "--lat", "-60,-30"])
         assert "mean_bias" in capsys.readouterr().out
+
+    def test_seasons_option(self, tmp_path: Path) -> None:
+        from climval.cli import main
+
+        ref, can = climval.demo_data()
+        ref.to_dataset().to_netcdf(tmp_path / "ref.nc")
+        can.to_dataset().to_netcdf(tmp_path / "can.nc")
+        out = tmp_path / "out.json"
+        args = ["compare", str(tmp_path / "ref.nc"), str(tmp_path / "can.nc"), "--by", "season"]
+        main([*args, "--seasons", "calendar", "--output", str(out)])
+        assert json.loads(out.read_text())["provenance"]["options"]["seasons"] == "calendar"
 
 
 # ---------------------------------------------------------------------------

@@ -27,9 +27,9 @@ The group "all" holds the whole period and is always present. With
 ``seasons="contiguous"`` (default) a December belongs to the following
 year's DJF, and a season of a given year counts only when all three of its
 months are present, so partial winters at the start and end of the period
-are left out (recorded in the provenance). ``seasons="calendar"`` keeps the
-0.2.0 behaviour: every December, January and February in the period form
-DJF, whether or not they belong to one winter.
+are left out (recorded in the provenance). ``seasons="calendar"`` pools every
+December, January and February in the period into DJF, whether or not they
+belong to one winter, as xarray's ``time.season`` does.
 """
 
 from __future__ import annotations
