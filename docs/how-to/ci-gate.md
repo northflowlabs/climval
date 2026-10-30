@@ -23,6 +23,10 @@ Each limit takes `min`, `max` and `abs_max` (any combination), and optionally
 `group` (default `all`; `"*"` checks every group, for example every season).
 With an extra dimension such as `member` or `model`, every member is checked
 and must pass. A NaN value fails, because it cannot show that the limit holds.
+A limit must be a finite number, `min` may not be above `max` and `abs_max`
+may not be negative: anything else raises `ValueError` before any value is
+checked, because a NaN limit would pass every value and an inverted range
+would fail every value.
 A threshold that matches no value (a metric that was not computed, a group
 that does not exist) raises an error rather than passing silently. Metrics
 may be named by their aliases (`bias` for `mean_bias`, `pearson` for
@@ -115,8 +119,22 @@ checks:
 | `name` | display name |
 
 Everything is validated before any data is opened: unknown keys, invalid
-choices, unknown metrics, thresholds on samples that are not computed and
-groups without `by` are configuration errors.
+choices, unknown metrics, thresholds on samples that are not computed,
+limits that are not finite numbers, `min` above `max`, a negative `abs_max`,
+and groups that the check's `by` does not produce are configuration errors
+(exit code 2). The groups are `DJF`, `MAM`, `JJA` and `SON` for
+`by: season`, `Jan` to `Dec` for `by: month`, a year such as `2001` for
+`by: year`, and `all` or `"*"` with any `by`. A year that is well formed but
+outside the data is only found when the data are read, and is then an error
+of that check.
+
+Every check needs at least one threshold. A check without thresholds would
+pass whatever the values are, so it is a configuration error rather than a
+silent pass; to look at the values without gating, use `climval compare`.
+
+PyYAML reads YAML 1.1, in which `1e-3` (no decimal point) is a string, not a
+number. Limits therefore also accept numeric strings such as `"1e-3"`;
+writing `1.0e-3` gives a number in every YAML reader.
 
 ## Running it
 
@@ -173,6 +191,12 @@ known good version (a previous release of the model, or several models of an
 ensemble), then set limits a margin away from them so that a regression
 fails. Keep the reference data fixed, and record why each limit has its
 value next to it in the file.
+
+KGE and the percentile bias are computed on the Kelvin scale for
+temperatures, so a temperature bias looks small in them (about 1/280 of the
+value, since near-surface temperatures are about 280 K: a 1 K error in the
+95th percentile is a percentile bias of about 0.36 percent), and their limits
+must be set accordingly.
 
 ## Data for CI
 

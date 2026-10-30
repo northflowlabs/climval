@@ -56,9 +56,13 @@ def _headline(report: GateReport) -> str:
     total = len(report.outcomes)
     return (
         f"{_STATUS[report.status]}: {_VERDICT[report.status]} "
-        f"({n['pass']} of {total} checks passed, {n['fail']} failed, {n['error']} errors; "
-        f"exit code {report.exit_code})"
+        f"({n['pass']} of {_plural(total, 'check')} passed, {n['fail']} failed, "
+        f"{_plural(n['error'], 'error')}; exit code {report.exit_code})"
     )
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
 # ---------------------------------------------------------------------------
@@ -104,8 +108,37 @@ def render_text(report: GateReport) -> str:
 # ---------------------------------------------------------------------------
 
 
+_MD_ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}
+_MD_SPECIAL = frozenset("\\`*[]|")
+
+
 def _md(text: Any) -> str:
-    return str(text).replace("|", "\\|").replace("\n", " ")
+    """Text for Markdown: HTML is escaped and Markdown punctuation is backslash
+    escaped, so a check named ``<script>`` renders as text in a job summary."""
+    out = []
+    for ch in " ".join(str(text).splitlines()):
+        if ch in _MD_ESCAPES:
+            out.append(_MD_ESCAPES[ch])
+        elif ch in _MD_SPECIAL:
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _code(text: Any) -> str:
+    """An inline code span that no backtick in ``text`` can close early.
+
+    A code span shows its content literally, HTML included, so only the fence
+    needs care."""
+    s = " ".join(str(text).splitlines())
+    longest = run = 0
+    for ch in s:
+        run = run + 1 if ch == "`" else 0
+        longest = max(longest, run)
+    fence = "`" * (longest + 1)
+    pad = " " if s.startswith("`") or s.endswith("`") else ""
+    return f"{fence}{pad}{s}{pad}{fence}"
 
 
 def render_markdown(report: GateReport) -> str:
@@ -114,7 +147,7 @@ def render_markdown(report: GateReport) -> str:
     lines = ["## climval check", "", f"**{_headline(report)}**", ""]
     if report.config_path:
         sha = f" (sha256 `{report.config_sha256[:12]}`)" if report.config_sha256 else ""
-        lines += [f"Configuration: `{report.config_path}`{sha}", ""]
+        lines += [f"Configuration: {_code(report.config_path)}{sha}", ""]
     if report.config_error is not None:
         lines += [f"Configuration error: {_md(report.config_error)}", ""]
         return "\n".join(lines)
@@ -133,13 +166,13 @@ def render_markdown(report: GateReport) -> str:
         if o.description:
             lines += [_md(o.description), ""]
         if o.status == "error":
-            lines += [f"{o.error_type}: {_md(o.error)}", ""]
+            lines += [f"{_md(o.error_type)}: {_md(o.error)}", ""]
             continue
         assert o.thresholds is not None and o.comparison is not None
         c0 = o.comparison
         lines += [
             f"{_md(c0.candidate_name)} against {_md(c0.reference_name)}, variable "
-            f"`{c0.variable}`" + (f" in {c0.units}" if c0.units else "") + ".",
+            f"{_code(c0.variable)}" + (f" in {_md(c0.units)}" if c0.units else "") + ".",
             "",
         ]
         if o.thresholds.checks:
@@ -150,7 +183,8 @@ def render_markdown(report: GateReport) -> str:
             ordered = sorted(o.thresholds.checks, key=lambda c: c.passed)
             for c in ordered:
                 lines.append(
-                    f"| {'pass' if c.passed else '**fail**'} | {c.metric} | {_md(_where(c))} | "
+                    f"| {'pass' if c.passed else '**fail**'} | {_md(c.metric)} | "
+                    f"{_md(_where(c))} | "
                     f"{_value(c)} | {_md(_units(o, c.metric))} | {limit_text(c.limits)} |"
                 )
         else:

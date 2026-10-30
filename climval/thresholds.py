@@ -16,7 +16,9 @@ True
 
 Each limit may name ``sample`` (default "space_time") and ``group``
 (default "all"; "*" checks every group). A NaN value fails, because it
-cannot show that the limit holds. Metrics may be named by the aliases
+cannot show that the limit holds. Limits must be finite numbers, ``min``
+may not exceed ``max`` and ``abs_max`` may not be negative; anything else
+raises ValueError before a value is checked. Metrics may be named by the aliases
 :func:`climval.metrics.get_metric` accepts ("bias", "tss", "pearson" and so
 on); the checks report the metric's own name.
 """
@@ -24,9 +26,12 @@ on); the checks report the metric's own name.
 from __future__ import annotations
 
 import math
+import numbers
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 if TYPE_CHECKING:
     from climval.result import Comparison
@@ -75,8 +80,41 @@ class ThresholdResult:
 
     def summary(self) -> str:
         lines = [f"{'PASS' if c.passed else 'FAIL'}  {c.message}" for c in self.checks]
-        lines.append(f"{len(self.checks) - len(self.failures)} of {len(self.checks)} checks passed")
+        n = len(self.checks)
+        lines.append(f"{n - len(self.failures)} of {n} check{'' if n == 1 else 's'} passed")
         return "\n".join(lines)
+
+
+def validate_limits(spec: Mapping[str, Any], where: str = "threshold") -> dict[str, float]:
+    """The limits of one threshold as floats, after checking they make sense.
+
+    Raises ValueError for a missing, non-numeric (booleans included) or
+    non-finite limit, for ``min`` above ``max`` and for a negative ``abs_max``.
+    A NaN limit would otherwise pass every value, and an inverted range would
+    fail every value.
+    """
+    limits: dict[str, float] = {}
+    for k in _LIMITS:
+        if k not in spec:
+            continue
+        v = spec[k]
+        if isinstance(v, (bool, np.bool_)) or not isinstance(v, numbers.Real):
+            raise ValueError(f"{where}: {k} must be a number, got {v!r}")
+        f = float(v)
+        if not math.isfinite(f):
+            raise ValueError(f"{where}: {k} must be a finite number, got {v!r}")
+        limits[k] = f
+    if not limits:
+        raise ValueError(f"{where}: give at least one of {list(_LIMITS)}")
+    if "min" in limits and "max" in limits and limits["min"] > limits["max"]:
+        raise ValueError(
+            f"{where}: min {limits['min']:g} is above max {limits['max']:g}, so no value can pass"
+        )
+    if "abs_max" in limits and limits["abs_max"] < 0:
+        raise ValueError(
+            f"{where}: abs_max {limits['abs_max']:g} is negative, so no value can pass"
+        )
+    return limits
 
 
 def _check(value: float, limits: dict[str, float]) -> tuple[bool, list[str]]:
@@ -102,12 +140,10 @@ def evaluate_thresholds(
     checks: list[ThresholdCheck] = []
     for given, spec in thresholds.items():
         metric = canonical_name(given)
-        limits = {k: float(spec[k]) for k in _LIMITS if k in spec}
-        if not limits:
-            raise ValueError(f"Threshold for {metric!r} needs one of {_LIMITS}")
         unknown = set(spec) - set(_LIMITS) - {"sample", "group"}
         if unknown:
             raise ValueError(f"Unknown threshold keys for {metric!r}: {sorted(unknown)}")
+        limits = validate_limits(spec, f"Threshold for {metric!r}")
         sample = str(spec.get("sample", "space_time"))
         group = str(spec.get("group", "all"))
         matched = [

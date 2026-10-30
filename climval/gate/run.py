@@ -12,6 +12,7 @@ run.
 
 from __future__ import annotations
 
+import copy
 import json
 import time
 import traceback
@@ -168,10 +169,36 @@ def _write(path: str | Path, text: str, append: bool = False) -> None:
 
 
 class _Catalogs:
-    """Open each intake-esm catalogue once per run."""
+    """Open each intake-esm catalogue, and each input, once per run.
+
+    Checks that share an input (the same path or catalogue query, ``sel`` and
+    open options) get the same lazily opened Dataset, so a configuration with
+    several checks on one file reads its metadata once.
+    """
 
     def __init__(self) -> None:
         self._cache: dict[str, Any] = {}
+        self._inputs: dict[str, tuple[xr.Dataset, dict[str, Any]]] = {}
+
+    def open(
+        self, spec: InputSpec, check_kwargs: Mapping[str, Any]
+    ) -> tuple[xr.Dataset, dict[str, Any]]:
+        """:func:`open_input` with a cache keyed on everything that affects the result."""
+        key = json.dumps(
+            {
+                "path": spec.path,
+                "catalog": spec.catalog,
+                "query": spec.query,
+                "sel": spec.sel,
+                "open_kwargs": _split_open_kwargs(spec, check_kwargs),
+            },
+            sort_keys=True,
+            default=repr,
+        )
+        if key not in self._inputs:
+            self._inputs[key] = open_input(spec, check_kwargs, self)
+        ds, info = self._inputs[key]
+        return ds, copy.deepcopy(info)
 
     def get(self, url: str) -> Any:
         if url not in self._cache:
@@ -295,8 +322,8 @@ def run_check(
             description=check.description,
         )
         try:
-            ref_ds, ref_info = open_input(check.reference, check_kwargs, catalogs)
-            can_ds, can_info = open_input(check.candidate, check_kwargs, catalogs)
+            ref_ds, ref_info = catalogs.open(check.reference, check_kwargs)
+            can_ds, can_info = catalogs.open(check.candidate, check_kwargs)
             outcome.inputs = {"reference": ref_info, "candidate": can_info}
             comparison = climval.compare(ref_ds, can_ds, variable, names=names, **options)
             for role, info in outcome.inputs.items():

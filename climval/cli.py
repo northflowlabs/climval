@@ -112,7 +112,23 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    """Run the checks of a configuration file; the return value is the exit code."""
+    """Run the checks of a configuration file; the return value is the exit code.
+
+    Exit code 1 means a threshold failed and nothing else. Anything unexpected
+    (an output path that is a directory, a file that cannot be written, a bug)
+    is reported on stderr with exit code 2, never 1.
+    """
+    from climval.gate import EXIT_ERROR
+
+    try:
+        return _cmd_check(args)
+    except Exception as exc:  # noqa: BLE001 - exit code 1 is reserved for threshold failures
+        detail = " ".join(str(exc).split())
+        print(f"climval check: error: {type(exc).__name__}: {detail}", file=sys.stderr)
+        return EXIT_ERROR
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
     import os
 
     from climval.errors import ConfigError
@@ -125,7 +141,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         config = None
     if config is not None and args.validate:
         names = ", ".join(c.name for c in config.checks)
-        print(f"climval check: {args.config} is valid ({len(config.checks)} checks: {names})")
+        n = len(config.checks)
+        print(f"climval check: {args.config} is valid ({n} check{'' if n == 1 else 's'}: {names})")
         return EXIT_PASS
     if config is not None:
         progress = None if args.quiet else (lambda msg: print(f"climval check: {msg}", flush=True))
@@ -290,9 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument(
         "--regrid", default="bilinear", choices=["bilinear", "nearest", "conservative"]
     )
-    cmp_p.add_argument(
-        "--target", default="coarser", choices=["coarser", "reference", "candidate"]
-    )
+    cmp_p.add_argument("--target", default="coarser", choices=["coarser", "reference", "candidate"])
     cmp_p.add_argument("--freq", default=None, help="h, 3h (any N dividing 24), D, MS or YS")
     cmp_p.add_argument(
         "--min-coverage",

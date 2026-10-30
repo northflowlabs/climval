@@ -25,14 +25,23 @@ thresholds on the resulting values::
           pearson_r: {min: 0.95, sample: climatology}
 
 Everything is validated before any data is opened, so a typo fails fast
-with exit code 2 and a message that names the offending key.
+with exit code 2 and a message that names the offending key. That includes
+the limits (finite numbers, ``min`` not above ``max``, ``abs_max`` not
+negative) and the threshold groups, which must be names that the check's
+``by`` produces. Every check needs at least one threshold: a check that
+gates nothing is a configuration error, not a pass.
+
+Limits may also be written as numeric strings such as ``"1e-3"``: PyYAML
+follows YAML 1.1, which reads ``1e-3`` (no decimal point) as a string.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -91,6 +100,10 @@ _CHOICES: dict[str, tuple[Any, ...]] = {
 }
 _SAMPLES = ("space_time", "climatology", "space", "time")
 _SCALAR_SAMPLES = ("space_time", "climatology")
+_SEASONS = ("DJF", "MAM", "JJA", "SON")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_YEAR = re.compile(r"^-?\d{1,4}$")
+_NUMERIC = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
 
 
 @dataclass
@@ -231,7 +244,11 @@ def parse_config(data: Any, base_dir: str | os.PathLike[str] | None = None) -> G
         raise ConfigError("The configuration must be a mapping with a 'checks' list")
     _no_unknown(data, TOP_KEYS, "configuration")
     version = data.get("version", 1)
-    if version not in SUPPORTED_VERSIONS:
+    if (
+        isinstance(version, bool)
+        or not isinstance(version, int)
+        or version not in SUPPORTED_VERSIONS
+    ):
         raise ConfigError(f"version: unsupported configuration version {version!r}; use 1")
     defaults = data.get("defaults", {}) or {}
     if not isinstance(defaults, Mapping):
@@ -370,19 +387,58 @@ def _parse_region(value: Any, where: str) -> Any:
 def _numbers(value: Any, where: str) -> list[float]:
     if not isinstance(value, Sequence) or isinstance(value, str):
         raise ConfigError(f"{where}: expected a list of numbers")
+    if any(isinstance(v, bool) for v in value):
+        raise ConfigError(f"{where}: expected numbers, got {list(value)}")
     try:
-        return [float(v) for v in value]
+        nums = [float(v) for v in value]
     except (TypeError, ValueError):
         raise ConfigError(f"{where}: expected numbers, got {list(value)}") from None
+    if not all(math.isfinite(v) for v in nums):
+        raise ConfigError(f"{where}: expected finite numbers, got {list(value)}")
+    return nums
+
+
+def _limit(value: Any, where: str) -> float:
+    """A threshold limit: a number, or a numeric string such as "1e-3"."""
+    given = value
+    if isinstance(value, str) and _NUMERIC.match(value.strip()):
+        value = float(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{where}: must be a number, got {given!r}")
+    if not math.isfinite(value):
+        raise ConfigError(f"{where}: must be a finite number, got {given!r}")
+    return value
+
+
+def _check_group(group: str, by: str | None, where: str) -> None:
+    """A threshold group must be one that the check's ``by`` produces."""
+    if group in ("all", "*"):
+        return
+    if by is None:
+        raise ConfigError(f"{where}: group {group!r} needs 'by' (season, month or year)")
+    if by == "season":
+        known, hint = group in _SEASONS, f"one of {list(_SEASONS)}"
+    elif by == "month":
+        known, hint = group in _MONTHS, f"one of {list(_MONTHS)}"
+    else:
+        known, hint = bool(_YEAR.match(group)), "a year such as '2001'"
+    if not known:
+        raise ConfigError(
+            f"{where}: group {group!r} is not a group of by={by!r}; use 'all', '*' or {hint}"
+        )
 
 
 def _parse_thresholds(
-    value: Any, where: str, metrics: list[str] | None, samples: list[str]
+    value: Any, where: str, metrics: list[str] | None, samples: list[str], by: str | None
 ) -> list[dict[str, Any]]:
     from climval.metrics.stats import get_metric
+    from climval.thresholds import validate_limits
 
-    if value is None:
-        return []
+    if value is None or (isinstance(value, (Mapping, list)) and not value):
+        raise ConfigError(
+            f"{where}: a check needs at least one threshold, for example "
+            "rmse: {max: 2.0}; a check without thresholds would pass whatever the values"
+        )
     items: list[tuple[str, dict[str, Any]]] = []
     if isinstance(value, Mapping):
         for metric, spec in value.items():
@@ -418,12 +474,13 @@ def _parse_thresholds(
             metric = canonical
             if metrics is not None and metric not in metrics:
                 raise ConfigError(f"{loc}: metric {metric!r} is not in this check's metrics")
-        limits = {k: item[k] for k in LIMIT_KEYS if k in item}
+        limits = {k: _limit(item[k], f"{loc}.{k}") for k in LIMIT_KEYS if k in item}
         if not limits:
             raise ConfigError(f"{loc}: give at least one of {list(LIMIT_KEYS)}")
-        for k, v in limits.items():
-            if isinstance(v, bool) or not isinstance(v, (int, float)):
-                raise ConfigError(f"{loc}.{k}: must be a number, got {v!r}")
+        try:
+            validate_limits(limits, loc)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from None
         sample = str(item.get("sample", "space_time"))
         if sample not in _SCALAR_SAMPLES:
             raise ConfigError(f"{loc}.sample: thresholds apply to {list(_SCALAR_SAMPLES)}")
@@ -431,7 +488,11 @@ def _parse_thresholds(
             raise ConfigError(f"{loc}.sample: {sample!r} is not in this check's samples")
         clean: dict[str, Any] = {"metric": metric, "sample": sample, **limits}
         if "group" in item:
-            clean["group"] = str(item["group"])
+            group = item["group"]
+            if isinstance(group, bool) or not isinstance(group, (str, int)):
+                raise ConfigError(f"{loc}.group: must be a group name, got {group!r}")
+            clean["group"] = str(group)
+            _check_group(clean["group"], by, f"{loc}.group")
         out.append(clean)
     return out
 
@@ -520,13 +581,12 @@ def _parse_check(item: Mapping[str, Any], where: str, base: Path | None, index: 
 
     samples = list(options.get("samples", ["space_time", "climatology"]))
     thresholds = _parse_thresholds(
-        item.get("thresholds"), f"{where}.thresholds", options.get("metrics"), samples
+        item.get("thresholds"),
+        f"{where}.thresholds",
+        options.get("metrics"),
+        samples,
+        options.get("by"),
     )
-    for t in thresholds:
-        if t.get("group", "all") not in ("all", "*") and "by" not in options:
-            raise ConfigError(
-                f"{where}.thresholds: group {t['group']!r} needs 'by' (season, month or year)"
-            )
 
     name = item.get("name")
     if name is None:

@@ -24,6 +24,7 @@ from climval.gate import (
 )
 
 DATA = Path(__file__).parent / "data" / "gate"
+_T = {"rmse": {"max": 100}}
 
 
 @pytest.fixture
@@ -40,6 +41,8 @@ def _base(**extra: Any) -> dict[str, Any]:
         "reference": "reference.nc",
         "candidate": "candidate.nc",
         "variable": {"reference": "t2m", "candidate": "tas"},
+        # every check needs a threshold; this one holds for the synthetic data
+        "thresholds": {"rmse": {"max": 100}},
         **extra,
     }
     return {"version": 1, "checks": [check]}
@@ -162,8 +165,8 @@ def test_engine_options_pass_through(gate_dir: Path) -> None:
         (
             {
                 "checks": [
-                    {"reference": "a.nc", "candidate": "b.nc", "name": "x"},
-                    {"reference": "a.nc", "candidate": "b.nc", "name": "x"},
+                    {"reference": "a.nc", "candidate": "b.nc", "name": "x", "thresholds": _T},
+                    {"reference": "a.nc", "candidate": "b.nc", "name": "x", "thresholds": _T},
                 ]
             },
             "duplicate",
@@ -243,7 +246,11 @@ def test_error_wins_over_failure(gate_dir: Path) -> None:
 
 
 def test_threshold_on_missing_group_is_an_error(gate_dir: Path) -> None:
-    data = _base(by="season", thresholds={"rmse": {"max": 2, "group": "Winter"}})
+    # a misspelt group fails before any data is read
+    with pytest.raises(ConfigError, match="not a group of by='season'"):
+        parse_config(_base(by="season", thresholds={"rmse": {"max": 2, "group": "Winter"}}))
+    # a well-formed year outside the data is only known once the data are read
+    data = _base(by="year", thresholds={"rmse": {"max": 2, "group": 1900}})
     report = run(parse_config(data, base_dir=gate_dir))
     assert report.outcomes[0].status == "error"
     assert "No value" in str(report.outcomes[0].error)
@@ -281,10 +288,15 @@ def test_several_variables_and_sel(gate_dir: Path) -> None:
     assert report.outcomes[0].inputs["candidate"]["sel"] == {"member": "m2"}
 
 
-def test_check_without_thresholds_passes(gate_dir: Path) -> None:
-    report = run(parse_config(_base(), base_dir=gate_dir))
-    assert report.exit_code == EXIT_PASS
-    assert "nothing was gated" in report.summary_text()
+def test_check_without_thresholds_is_a_configuration_error(gate_dir: Path) -> None:
+    data = _base()
+    del data["checks"][0]["thresholds"]
+    with pytest.raises(ConfigError, match="at least one threshold"):
+        parse_config(data, base_dir=gate_dir)
+    with pytest.raises(ConfigError, match="at least one threshold"):
+        parse_config(_base(thresholds={}), base_dir=gate_dir)
+    with pytest.raises(ConfigError, match="at least one threshold"):
+        parse_config(_base(thresholds=[]), base_dir=gate_dir)
 
 
 def test_nan_value_fails(gate_dir: Path) -> None:
