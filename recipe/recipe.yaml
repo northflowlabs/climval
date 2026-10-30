@@ -1,0 +1,87 @@
+# Draft conda-forge recipe for climval (rattler-build, recipe format v1).
+# For submission to conda-forge/staged-recipes after 0.2.0 is on PyPI:
+# 1. replace the sha256 below with the hash of the sdist on PyPI
+#    (pip download climval==0.2.0 --no-deps --no-binary :all: and sha256sum);
+# 2. add the GitHub handles of the maintainers under extra.recipe-maintainers;
+# 3. copy this file to recipes/climval/recipe.yaml in a fork of staged-recipes.
+schema_version: 1
+
+context:
+  name: climval
+  version: "0.2.0"
+  python_min: "3.10"
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  url: https://pypi.org/packages/source/${{ name[0] }}/${{ name }}/climval-${{ version }}.tar.gz
+  sha256: 0000000000000000000000000000000000000000000000000000000000000000
+
+build:
+  number: 0
+  noarch: python
+  script: ${{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  python:
+    entry_points:
+      - climval = climval.cli:main
+
+requirements:
+  host:
+    - python ${{ python_min }}.*
+    - pip
+    - setuptools >=68
+    - wheel
+  run:
+    - python >=${{ python_min }}
+    - numpy >=1.24
+    - scipy >=1.10
+    - pandas >=2.0
+    - xarray >=2023.9
+    - cftime >=1.6
+    - pyyaml >=6.0
+    # needed on Python 3.10 only; a noarch recipe cannot depend on the Python version
+    - tomli >=2.0
+  run_constraints:
+    - dask >=2023.6
+    - zarr >=2.14
+    - intake-esm >=2023.6
+    - regionmask >=0.11
+    - pint >=0.22
+    - cf_xarray >=0.8
+    - xesmf >=0.8
+
+tests:
+  - python:
+      imports:
+        - climval
+        - climval.gate
+      pip_check: true
+      python_version: ${{ python_min }}.*
+  - requirements:
+      run:
+        - python ${{ python_min }}.*
+    script:
+      - climval --help
+      - climval list-metrics
+      - climval demo
+
+about:
+  homepage: https://northflowlabs.github.io/climval/
+  repository: https://github.com/northflowlabs/climval
+  documentation: https://northflowlabs.github.io/climval/
+  summary: Validate climate model output against reference data, aligned in space, time and units
+  description: |
+    climval aligns a candidate with a reference (coordinates, longitude
+    convention, regions, calendars, frequencies, regridding, units, paired
+    missing values, area weights), computes weighted metrics with xarray,
+    lazily on dask arrays, records the provenance of every value, and gates
+    continuous integration on thresholds with the climval check command.
+  license: Apache-2.0
+  license_file: LICENSE
+
+extra:
+  recipe-maintainers:
+    # GitHub handles of the people who will maintain the feedstock
+    []
