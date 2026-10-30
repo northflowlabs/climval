@@ -1,69 +1,40 @@
 """
 examples/basic_comparison.py
-==============================
-Quickstart: compare ERA5 (reference) against two CMIP6 models
-using synthetic data (no files required).
+============================
+Compare a candidate with a reference on different grids, calendars and units.
+
+The two fields come from climval.demo_data(): a synthetic reference on a 4
+degree grid (standard calendar, K) and a synthetic candidate on a 5 degree
+grid (360_day calendar, degC, longitudes 0..360, latitude descending). The
+scores describe these synthetic fields only. With real data, pass xarray
+objects or paths and URLs (NetCDF, Zarr) instead.
 
 Run:
     python examples/basic_comparison.py
 """
 
-from datetime import datetime
-from climval import BenchmarkSuite, load_model
-from climval.metrics import PercentileBias, TaylorSkillScore
+import climval
 
-# ── 1. Load models ────────────────────────────────────────────────────────────
+reference, candidate = climval.demo_data()
 
-era5 = load_model(
-    "era5",
-    name="ERA5",
-    lat_range=(35.0, 72.0),          # Europe
-    lon_range=(-10.0, 40.0),
-    time_start=datetime(2000, 1, 1),
-    time_end=datetime(2020, 12, 31),
+result = climval.compare(
+    reference,
+    candidate,
+    variable="tas",
+    region=climval.Box(lat=(35.0, 72.0), lon=(-10.0, 40.0)),  # Europe
+    period=("2000", "2003"),
+    by="season",
+    names=("synthetic reference", "synthetic candidate"),
 )
 
-mpi = load_model(
-    "cmip6-mpi",
-    name="MPI-ESM1-2-HR",
-    lat_range=(35.0, 72.0),
-    lon_range=(-10.0, 40.0),
-    time_start=datetime(2000, 1, 1),
-    time_end=datetime(2020, 12, 31),
-)
+result.summary()
 
-cordex = load_model(
-    "cordex-eur",
-    name="CORDEX-EUR-11",
-    lat_range=(35.0, 72.0),
-    lon_range=(-10.0, 40.0),
-    time_start=datetime(2000, 1, 1),
-    time_end=datetime(2020, 12, 31),
-)
+# Pass or fail limits, as a CI gate would use them
+verdict = result.check({"rmse": {"max": 2.0}, "pearson_r": {"min": 0.9, "sample": "climatology"}})
+print()
+print(verdict.summary())
 
-# ── 2. Build suite ────────────────────────────────────────────────────────────
-
-suite = BenchmarkSuite(name="Europe-2000-2020")
-suite.register(era5, role="reference")
-suite.register(mpi)
-suite.register(cordex)
-
-# Add extra metrics (optional: defaults already include RMSE, MAE, bias, r, TSS)
-suite.add_metric(PercentileBias(percentile=99.0))
-
-# ── 3. Run ────────────────────────────────────────────────────────────────────
-
-report = suite.run(
-    variables=["tas", "pr"],
-    n_samples=2000,   # synthetic sample size (ignored when real files are used)
-    seed=42,
-)
-
-# ── 4. Output ─────────────────────────────────────────────────────────────────
-
-report.summary()
-report.export("results/europe_2000_2020.json")
-report.export("results/europe_2000_2020.html")
-report.export("results/europe_2000_2020.md")
-
+result.export("results/europe_2000_2003.json")
+result.export("results/europe_2000_2003.html")
+result.export("results/europe_2000_2003.md")
 print("Done. Results written to results/")

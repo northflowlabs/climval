@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "climval"
-version = "0.1.1"
-description = "Climate model validation and benchmarking framework"
+version = "0.2.0"
+description = "Validate climate model output against reference data, aligned in space, time and units"
 authors = [{ name = "Northflow Technologies AS", email = "hello@northflow.no" }]
 license = { text = "Apache-2.0" }
 readme = "README.md"
@@ -13,6 +13,7 @@ requires-python = ">=3.10"
 keywords = [
     "climate", "validation", "benchmarking", "CMIP6", "ERA5",
     "reanalysis", "atmospheric science", "earth system model",
+    "xarray", "dask", "pangeo", "zarr", "regridding",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -22,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
     "Topic :: Scientific/Engineering :: GIS",
     "Typing :: Typed",
@@ -30,26 +32,61 @@ classifiers = [
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
+    "pandas>=2.0",
+    "xarray>=2023.9",
+    # Model calendars (noleap, 360_day, ...) decode only with cftime.
+    "cftime>=1.6",
 ]
 
 [project.optional-dependencies]
-netcdf = ["xarray>=2023.1", "netCDF4>=1.6"]
-viz    = ["matplotlib>=3.7", "cartopy>=0.21"]
-dev    = [
-    "pytest>=7.4",
-    "pytest-cov>=4.1",
-    "ruff>=0.1",
-    "mypy>=1.5",
+netcdf  = ["netCDF4>=1.6", "h5netcdf>=1.1"]
+cloud   = [
+    "dask[array]>=2023.6",
+    "zarr>=2.14",
+    "fsspec>=2023.6",
+    "gcsfs>=2023.6",
+    "s3fs>=2023.6",
+    "aiohttp>=3.8",
+    "requests>=2.28",
+    "h5netcdf>=1.1",
 ]
+# xESMF needs the ESMF library; on most systems install it with
+# conda install -c conda-forge xesmf. It is not part of "all" for that reason.
+regrid  = ["xesmf>=0.8"]
+units   = ["pint>=0.22", "cf_xarray>=0.8"]
+regions = ["regionmask>=0.11"]
+cftime  = ["cftime>=1.6"]  # kept for compatibility; cftime is a core dependency
+viz     = ["matplotlib>=3.7", "cartopy>=0.21"]
 all = [
-    "xarray>=2023.1",
     "netCDF4>=1.6",
+    "h5netcdf>=1.1",
+    "dask[array]>=2023.6",
+    "zarr>=2.14",
+    "fsspec>=2023.6",
+    "gcsfs>=2023.6",
+    "s3fs>=2023.6",
+    "aiohttp>=3.8",
+    "requests>=2.28",
+    "pint>=0.22",
+    "cf_xarray>=0.8",
+    "regionmask>=0.11",
+    "cftime>=1.6",
     "matplotlib>=3.7",
     "cartopy>=0.21",
+]
+dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
-    "ruff>=0.1",
+    "ruff>=0.4",
     "mypy>=1.5",
+    "xskillscore>=0.0.24",
+    "dask[array]>=2023.6",
+    "zarr>=2.14",
+    "netCDF4>=1.6",
+    "h5netcdf>=1.1",
+    "cftime>=1.6",
+    "pint>=0.22",
+    "cf_xarray>=0.8",
 ]
 
 [project.scripts]
@@ -66,9 +103,15 @@ Organisation = "https://northflow.no"
 where = ["."]
 include = ["climval*"]
 
+[tool.setuptools.package-data]
+climval = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts   = "-v --tb=short"
+
+[tool.ruff]
+line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B"]
