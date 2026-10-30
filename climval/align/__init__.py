@@ -11,20 +11,33 @@
    grid's convention, or a frame that keeps the region contiguous).
 5. ``region``: cut the box (crossing the antimeridian if asked). The target
    grid is cut exactly; the grid that will be regridded keeps a margin of
-   one cell and, for bilinear and nearest on a global grid, a wrapped column
-   at each end, so interpolation at the edges has neighbours. Conservative
-   remapping gets no wrapped columns; xESMF treats a global source as
-   periodic instead.
+   one cell and, for bilinear and nearest on a global grid when the box
+   reaches the edge of the longitude frame, a wrapped column at each end, so
+   interpolation at the edges has neighbours. The wrapped columns are added
+   after the time step, so they are aggregated once, not per time step.
+   Conservative remapping gets no wrapped columns; xESMF treats a global
+   source as periodic instead.
 6. ``time``: native frequencies (time bounds, frequency attribute or time
    steps), period, common frequency, aggregation with a coverage threshold
    and period matching across calendars (see :mod:`climval.align.temporal`).
 7. ``regrid``: interpolate or remap onto the target grid, or sample the grid
-   at station locations.
+   at station locations. A dask source is rechunked to whole horizontal
+   fields first, so interpolation works on a few large chunks.
 8. ``region_mask``: apply a regionmask polygon on the target grid.
 9. ``units``: convert the candidate into the reference's units.
 10. ``missing``: paired mask; a point counts only where both are valid.
 11. ``weights``: cell area (given, or computed from cell bounds), cos(latitude)
     on request, or uniform for station data.
+
+Inputs are cast to float64 (lazily for dask arrays), so lazy and eager runs
+of float32 data give the same values. The aligned dask arrays are rechunked
+to whole horizontal fields and dask's automatic chunk size along time, the
+same chunks for both inputs.
+
+:func:`align` reads no data values. It reads coordinates and, when an input
+is a Dataset or a file whose time, latitude or longitude bounds are dask
+arrays, those bounds variables, all of them in one small ``dask.compute``
+call, because the native frequency and the cell areas come from them.
 """
 
 from __future__ import annotations
@@ -36,6 +49,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from climval._chunking import field_chunks
 from climval.align.coords import (
     GridInfo,
     is_global_lon,
@@ -53,6 +67,7 @@ from climval.align.region import (
     RegionLike,
     as_region,
     choose_lon_frame,
+    needs_wrap,
     subset_box,
 )
 from climval.align.regrid import METHODS
@@ -60,7 +75,7 @@ from climval.align.regrid import regrid as _regrid
 from climval.align.temporal import DEFAULT_MIN_COVERAGE, align_time, time_weights
 from climval.align.units import harmonise_units
 from climval.align.weights import make_weights
-from climval.errors import AlignmentError, CurvilinearGridError
+from climval.errors import AlignmentError, CurvilinearGridError, NoOverlapError
 from climval.provenance import describe_input
 
 __all__ = ["AlignedPair", "align", "Box", "MaskRegion"]
@@ -174,12 +189,13 @@ def align(
     area: xr.DataArray | None = None,
     open_kwargs: Mapping[str, Any] | None = None,
 ) -> AlignedPair:
-    """Align a candidate with a reference. Nothing is computed; see module docs."""
+    """Align a candidate with a reference without reading data values; see module docs."""
     if regrid not in METHODS:
         raise AlignmentError(f"regrid must be one of {METHODS}, got {regrid!r}")
     ref_var, can_var = _split_variable(variable)
     r_in: ResolvedInput = resolve_input(reference, ref_var, "reference", open_kwargs)
     c_in: ResolvedInput = resolve_input(candidate, can_var, "candidate", open_kwargs)
+    _load_bounds(r_in, c_in)
     inputs = {
         "reference": describe_input(r_in.data, r_in.kind, r_in.location, r_in.dataset_attrs),
         "candidate": describe_input(c_in.data, c_in.kind, c_in.location, c_in.dataset_attrs),
@@ -282,6 +298,10 @@ def align(
             "regionmask regions are not supported with station data; use climval.Box"
         )
     interpolates = regrid in ("bilinear", "nearest") or stations
+    # Global sources that need wrapped columns are padded after the time step
+    # (and cut in longitude after the padding), so the padding is aggregated
+    # once instead of splitting every native time step into narrow chunks.
+    pad_after: dict[str, tuple[float, float]] = {}
     for name in arrays:
         da = arrays[name]
         if grids[name].kind == "station":
@@ -292,27 +312,29 @@ def align(
             continue
         if grids[name].kind != "rectilinear":
             continue
-        if (
+        margin_lat = spacing(da["lat"].values) if sources[name] and "lat" in da.dims else 0.0
+        margin_lon = spacing(da["lon"].values) if sources[name] and "lon" in da.dims else 0.0
+        margin_lat = 0.0 if np.isnan(margin_lat) else margin_lat
+        margin_lon = 0.0 if np.isnan(margin_lon) else margin_lon
+        pad = (
             sources[name]
             and interpolates
             and "lon" in da.dims
             and is_global_lon(da["lon"].values)
             and not _same_axis(da["lon"].values, tgt_lon)
-        ):
-            da = pad_periodic(da)
+            and needs_wrap(da["lon"].values, box, frame, margin_lon)
+        )
+        if pad:
+            pad_after[name] = (margin_lat, margin_lon)
             reg_rec[f"{name}_padded"] = "global longitude: one wrapped column added at each end"
         if box is not None:
-            margin_lat = spacing(da["lat"].values) if sources[name] and "lat" in da.dims else 0.0
-            margin_lon = spacing(da["lon"].values) if sources[name] and "lon" in da.dims else 0.0
             da = subset_box(
-                da,
-                box,
-                frame,
-                name,
-                margin_lat=0.0 if np.isnan(margin_lat) else margin_lat,
-                margin_lon=0.0 if np.isnan(margin_lon) else margin_lon,
+                da, box, frame, name, margin_lat=margin_lat, margin_lon=margin_lon, lon=not pad
             )
-            reg_rec[f"{name}_points"] = {d: int(da.sizes[d]) for d in HORIZONTAL if d in da.dims}
+            if not pad:
+                reg_rec[f"{name}_points"] = {
+                    d: int(da.sizes[d]) for d in HORIZONTAL if d in da.dims
+                }
         arrays[name] = da
     if custom is not None and box is not None:
         custom = subset_box(custom, box, frame, "target grid")
@@ -337,6 +359,17 @@ def align(
     )
     target_freq = time_rec.pop("target_freq", None)
     steps.append(time_rec)
+    # Aggregated inputs were cast to float64 before aggregating; cast the others.
+    ref, can = _as_float64(ref), _as_float64(can)
+    for name, (margin_lat, margin_lon) in pad_after.items():
+        da = pad_periodic(ref if name == "reference" else can)
+        if box is not None:
+            da = subset_box(da, box, frame, name, margin_lat=margin_lat, margin_lon=margin_lon)
+            reg_rec[f"{name}_points"] = {d: int(da.sizes[d]) for d in HORIZONTAL if d in da.dims}
+        if name == "reference":
+            ref = da
+        else:
+            can = da
 
     # 6. regrid
     if custom is not None:
@@ -366,6 +399,7 @@ def align(
             points=stations,
         )
         steps.append(rec)
+        _check_overlap(src, rec, name)
         if name == "candidate":
             can = src
         else:
@@ -409,6 +443,7 @@ def align(
     steps.append(unit_rec)
 
     # 9. paired missing-value mask
+    ref, can = _rechunk_pair(ref, can)
     valid = ref.notnull() & can.notnull()
     ref = ref.where(valid)
     can = can.where(valid)
@@ -459,6 +494,57 @@ def align(
             "region": reg_rec["region"],
         },
     )
+
+
+def _load_bounds(*inputs: ResolvedInput) -> None:
+    """Read every dask-backed bounds variable of the inputs in one ``dask.compute``."""
+    lazy = [(inp, axis) for inp in inputs for axis, b in inp.bounds.items() if b.chunks is not None]
+    if not lazy:
+        return
+    import dask
+
+    values = dask.compute(*[inp.bounds[axis] for inp, axis in lazy])  # type: ignore[attr-defined,no-untyped-call]
+    for (inp, axis), loaded in zip(lazy, values, strict=True):
+        inp.bounds[axis] = loaded
+
+
+def _as_float64(da: xr.DataArray) -> xr.DataArray:
+    """Numeric data as float64 (lazily for dask), so lazy and eager runs agree."""
+    if da.dtype.kind in "fiub" and da.dtype != np.float64:
+        out: xr.DataArray = da.astype(np.float64)
+        return out
+    return da
+
+
+def _rechunk_pair(ref: xr.DataArray, can: xr.DataArray) -> tuple[xr.DataArray, xr.DataArray]:
+    """Rechunk both aligned dask arrays to the same chunks.
+
+    Whole horizontal fields (or all stations) per chunk, when one field fits
+    in a quarter of dask's ``array.chunk-size``, and dask's automatic size
+    along time. Without this a regridded daily input keeps one chunk of a few
+    hundred kilobytes per day, and every metric adds tasks per chunk.
+    """
+    if ref.chunks is None and can.chunks is None:
+        return ref, can
+    ref = field_chunks(ref if ref.chunks is not None else ref.chunk())
+    can = can.chunk({d: c for d, c in ref.chunksizes.items() if d in can.dims})
+    return ref, can
+
+
+def _check_overlap(src: xr.DataArray, rec: dict[str, Any], role: str) -> None:
+    """Raise when no target point lies on the regridded source along an axis."""
+    outside = rec.get("target_points_outside_source", {})
+    gaps = rec.get("target_points_in_source_gaps", {})
+    for d, n_out in outside.items():
+        if d in src.dims and src.sizes[d] and max(n_out, gaps.get(d, 0)) >= src.sizes[d]:
+            raise NoOverlapError(
+                f"The {role} grid does not overlap the target grid along {d}: every target "
+                f"{d} lies outside it. Check the region and the extents of the inputs."
+            )
+    if rec.get("no_overlap"):
+        raise NoOverlapError(
+            f"The {role} grid does not overlap the target grid: {rec['no_overlap']}"
+        )
 
 
 def _time_bounds(bounds: xr.DataArray | None, da: xr.DataArray) -> xr.DataArray | None:

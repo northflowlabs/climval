@@ -20,20 +20,25 @@ A *sample* says which points a number is computed over:
 Time weights: for monthly and yearly comparisons each time step counts in
 proportion to the length of its period in days (in the reference's
 calendar), the same weighting climval uses to aggregate months into years.
-Daily and sub-daily steps count equally.
+Daily and sub-daily steps count equally. The ``space_time`` and ``time``
+samples and the time mean of ``climatology`` use these time weights.
 
 Groups come from ``by``: "season" (DJF, MAM, JJA, SON), "month" or "year".
 The group "all" holds the whole period and is always present. With
 ``seasons="contiguous"`` (default) a December belongs to the following
 year's DJF, and a season of a given year counts only when all three of its
 months are present, so partial winters at the start and end of the period
-are left out (recorded in the provenance). ``seasons="calendar"`` pools every
-December, January and February in the period into DJF, whether or not they
-belong to one winter, as xarray's ``time.season`` does.
+are left out (recorded in the provenance). For daily and sub-daily data a
+month counts as present only when at least ``min_coverage`` (default 0.8)
+of its time steps are, so one day of December does not complete a DJF.
+``seasons="calendar"`` pools every December, January and February in the
+period into DJF, whether or not they belong to one winter, as xarray's
+``time.season`` does.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Sequence
 from typing import Any
@@ -42,13 +47,15 @@ import numpy as np
 import xarray as xr
 
 from climval.errors import AlignmentError
-from climval.metrics.stats import BaseMetric, wmean
+from climval.metrics.stats import BaseMetric, shared_reductions, wmean
 
 SAMPLES: dict[str, str] = {
-    "space_time": "all valid points in space and time pooled, spatially weighted",
-    "climatology": "spatial pattern of the time-mean fields, spatially weighted",
-    "space": "spatial pattern at each time step (one value per time step)",
-    "time": "temporal statistics at each grid point (one map), equal weight per step",
+    "space_time": (
+        "all valid points in space and time pooled, weighted by spatial weight times time weight"
+    ),
+    "climatology": "spatial pattern of the time-weighted mean fields, spatially weighted",
+    "space": "spatial pattern at each time step (one value per time step), spatially weighted",
+    "time": "temporal statistics at each grid point (one map), time weighted",
 }
 SCALAR_SAMPLES = ("space_time", "climatology")
 DEFAULT_SAMPLES = ("space_time", "climatology")
@@ -61,24 +68,47 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 _SEASON_MONTHS = {"DJF": {12, 1, 2}, "MAM": {3, 4, 5}, "JJA": {6, 7, 8}, "SON": {9, 10, 11}}
 
 
-def complete_seasons(time: xr.DataArray) -> tuple[np.ndarray, list[str]]:
+def _steps_per_day(frequency: str | None) -> float | None:
+    if frequency == "daily":
+        return 1.0
+    if frequency == "hourly":
+        return 24.0
+    m = re.fullmatch(r"(\d+)-hourly", frequency or "")
+    return 24.0 / int(m.group(1)) if m else None
+
+
+def complete_seasons(
+    time: xr.DataArray, frequency: str | None = None, min_coverage: float = 0.8
+) -> tuple[np.ndarray, list[str]]:
     """Mask of time steps in complete contiguous seasons, and the seasons left out.
 
     A December belongs to the DJF of the following year. A season of a year
-    is complete when all three of its months are present.
+    is complete when all three of its months are present. For daily and
+    sub-daily ``frequency`` ("daily", "hourly", "3-hourly", ...) a month is
+    present when at least ``min_coverage`` of its time steps are.
     """
     labels = np.asarray(time.dt.season.values).astype(str)
     month = np.asarray(time.dt.month.values)
-    syear = np.asarray(time.dt.year.values) + (month == 12)
+    year = np.asarray(time.dt.year.values)
+    syear = year + (month == 12)
+    present = np.ones(labels.size, dtype=bool)
+    per_day = _steps_per_day(frequency)
+    if per_day is not None and labels.size:
+        key = year * 100 + month
+        days = np.asarray(time.dt.days_in_month.values, dtype=float)
+        uniq, inv, counts = np.unique(key, return_inverse=True, return_counts=True)
+        expected = np.zeros(uniq.size)
+        expected[inv.ravel()] = days * per_day
+        present = (counts >= min_coverage * expected - 1e-9)[inv.ravel()]
     keep = np.zeros(labels.size, dtype=bool)
     dropped: list[str] = []
     for name in _SEASONS:
-        for year in np.unique(syear[labels == name]):
-            idx = (labels == name) & (syear == year)
-            if set(month[idx].tolist()) == _SEASON_MONTHS[name]:
+        for y in np.unique(syear[labels == name]):
+            idx = (labels == name) & (syear == y)
+            if set(month[idx & present].tolist()) == _SEASON_MONTHS[name]:
                 keep |= idx
             else:
-                dropped.append(f"{name} {int(year)}")
+                dropped.append(f"{name} {int(y)}")
     return keep, dropped
 
 
@@ -87,6 +117,7 @@ def make_groups(
     by: str | None,
     frequency: str | None,
     seasons: str = "contiguous",
+    min_coverage: float = 0.8,
 ) -> list[tuple[str, np.ndarray | None]]:
     groups: list[tuple[str, np.ndarray | None]] = [("all", None)]
     if by is None:
@@ -102,7 +133,7 @@ def make_groups(
     if by == "season":
         labels = np.asarray(time.dt.season.values).astype(str)
         if seasons == "contiguous":
-            keep, _ = complete_seasons(time)
+            keep, _ = complete_seasons(time, frequency, min_coverage)
             labels = np.where(keep, labels, "")
         order: Sequence[str] = _SEASONS
     elif by == "month":
@@ -128,16 +159,20 @@ def _reduce_all(
     absolute_offset: float = 0.0,
 ) -> xr.Dataset:
     out: dict[str, xr.DataArray] = {}
-    for m in metrics:
-        rr, cc = (r + absolute_offset, c + absolute_offset) if m.ratio_scale else (r, c)
-        try:
-            value = m.reduce(rr, cc, w, list(dims))
-        except Exception as exc:
-            # Keep the original exception and its traceback; name the metric.
-            if sys.version_info >= (3, 11):
-                exc.add_note(f"climval: raised by metric {m.name!r} over dims {list(dims)}")
-            raise
-        out[m.name] = value.reset_coords(drop=True) if isinstance(value, xr.DataArray) else value
+    shifted = (r + absolute_offset, c + absolute_offset) if absolute_offset else (r, c)
+    with shared_reductions():
+        for m in metrics:
+            rr, cc = shifted if m.ratio_scale else (r, c)
+            try:
+                value = m.reduce(rr, cc, w, list(dims))
+            except Exception as exc:
+                # Keep the original exception and its traceback; name the metric.
+                if sys.version_info >= (3, 11):
+                    exc.add_note(f"climval: raised by metric {m.name!r} over dims {list(dims)}")
+                raise
+            out[m.name] = (
+                value.reset_coords(drop=True) if isinstance(value, xr.DataArray) else value
+            )
     out["n_points"] = valid.sum(list(dims))
     return xr.Dataset(out)
 
@@ -156,23 +191,26 @@ def evaluate(
     time_weights: xr.DataArray | None = None,
     seasons: str = "contiguous",
     absolute_offset: float = 0.0,
+    min_coverage: float = 0.8,
 ) -> dict[str, xr.Dataset]:
     """Lazy metric values: a Dataset per sample, one variable per metric.
 
     ``time_weights`` (dim ``time``) weight each time step, ``absolute_offset``
     is added to both inputs for metrics with ``ratio_scale`` (for example
-    273.15 for degC), see the module docstring for samples and groups.
+    273.15 for degC), ``min_coverage`` decides which months of daily or
+    sub-daily data count towards a contiguous season; see the module
+    docstring for samples and groups.
     """
     unknown = set(samples) - set(SAMPLES)
     if unknown:
         raise ValueError(f"Unknown samples {sorted(unknown)}; choose from {list(SAMPLES)}")
     spatial = list(spatial_dims)
     time_dims = ["time"] if has_time else []
-    groups = make_groups(reference["time"] if has_time else None, by, frequency, seasons)
+    groups = make_groups(
+        reference["time"] if has_time else None, by, frequency, seasons, min_coverage
+    )
 
-    def weights_for(
-        valid: xr.DataArray, spatial_w: bool, tw: xr.DataArray | None
-    ) -> xr.DataArray:
+    def weights_for(valid: xr.DataArray, spatial_w: bool, tw: xr.DataArray | None) -> xr.DataArray:
         w = valid.astype(float)
         if spatial_w and spatial_weights is not None:
             w = w * spatial_weights

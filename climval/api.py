@@ -176,6 +176,7 @@ def compare(
         time_weights=pair.time_weights,
         seasons=seasons,
         absolute_offset=offset,
+        min_coverage=min_coverage,
     )
     notes: dict[str, Any] = {}
     ratio = [m.name for m in resolved_metrics if m.ratio_scale]
@@ -195,7 +196,11 @@ def compare(
     }
     methods = {k: v for k, v in methods.items() if v}
     if by == "season" and pair.has_time:
-        dropped = complete_seasons(pair.reference["time"])[1] if seasons == "contiguous" else []
+        dropped = (
+            complete_seasons(pair.reference["time"], pair.frequency, min_coverage)[1]
+            if seasons == "contiguous"
+            else []
+        )
         notes["seasons"] = {"mode": seasons, "incomplete_seasons_left_out": dropped}
     ref_name = names[0] if names else _name(reference, pair.inputs["reference"], "reference")
     can_name = names[1] if names else _name(candidate, pair.inputs["candidate"], "candidate")

@@ -202,8 +202,14 @@ def subset_box(
     role: str,
     margin_lat: float = 0.0,
     margin_lon: float = 0.0,
+    *,
+    lon: bool = True,
 ) -> xr.DataArray:
-    """Select the box from an array already expressed in the longitude frame."""
+    """Select the box from an array already expressed in the longitude frame.
+
+    ``lon=False`` cuts latitude only (longitude is cut later, after the
+    periodic padding of a global source).
+    """
     eps = 1e-9
     if "lat" in da.dims:
         lat = np.asarray(da["lat"].values, dtype=float)
@@ -214,12 +220,23 @@ def subset_box(
                 f"(latitude {lat.min():.2f} to {lat.max():.2f})"
             )
         da = da.isel(lat=np.nonzero(keep)[0])
-    if box.subsets_lon and "lon" in da.dims:
-        lon = np.asarray(da["lon"].values, dtype=float)
+    if lon and box.subsets_lon and "lon" in da.dims:
+        lon_values = np.asarray(da["lon"].values, dtype=float)
         west = frame_start + np.mod(box.west - frame_start, 360.0)
         east = west + box.lon_width
-        keep = (lon >= west - margin_lon - eps) & (lon <= east + margin_lon + eps)
+        keep = (lon_values >= west - margin_lon - eps) & (lon_values <= east + margin_lon + eps)
         if not keep.any():
             raise NoOverlapError(f"The region {box.to_dict()} contains no longitude of the {role}")
         da = da.isel(lon=np.nonzero(keep)[0])
     return da
+
+
+def needs_wrap(lon: np.ndarray, box: Box | None, frame_start: float, margin_lon: float) -> bool:
+    """True when the box, widened by the margin, reaches beyond the outermost longitudes."""
+    if box is None or not box.subsets_lon:
+        return True
+    v = np.asarray(lon, dtype=float)
+    west = frame_start + np.mod(box.west - frame_start, 360.0)
+    east = west + box.lon_width
+    eps = 1e-9
+    return bool(west - margin_lon < v.min() - eps or east + margin_lon > v.max() + eps)

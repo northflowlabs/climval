@@ -32,7 +32,9 @@ climval therefore does not match timestamps. It
 The aligned pair carries the reference's time coordinate. Daily comparisons
 across calendars match days by label, so days that exist in only one
 calendar (29 February, 30 February, 31st days) drop out; monthly or coarser
-comparisons are calendar independent.
+comparisons are calendar independent. A daily or sub-daily comparison
+between a 360_day calendar and any other calendar warns, because the same
+date label falls at a different point of the seasonal cycle.
 """
 
 from __future__ import annotations
@@ -47,6 +49,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from climval._chunking import chunk_limit_bytes, field_chunks
 from climval.errors import AlignmentError, NoOverlapError
 
 DEFAULT_MIN_COVERAGE = 0.8
@@ -325,12 +328,137 @@ def select_period(da: xr.DataArray, period: tuple[Any, Any], role: str) -> xr.Da
             f"The period {period[0]} to {period[1]} contains no time step of the {role} "
             f"({_describe_range(da)})"
         )
-    out: xr.DataArray = da.isel(time=np.nonzero(keep)[0])
+    return take_time(da, np.nonzero(keep)[0])
+
+
+def take_time(da: xr.DataArray, idx: np.ndarray) -> xr.DataArray:
+    """``da.isel(time=idx)``, with a slice when ``idx`` is a contiguous run.
+
+    A slice keeps dask chunks whole; an index array adds a task per chunk.
+    """
+    idx = np.asarray(idx)
+    n = da.sizes["time"]
+    if idx.size and idx[-1] - idx[0] + 1 == idx.size and np.all(np.diff(idx) == 1):
+        if idx.size == n:
+            return da
+        out: xr.DataArray = da.isel(time=slice(int(idx[0]), int(idx[-1]) + 1))
+        return out
+    out = da.isel(time=idx)
+    return out
+
+
+def _fixed_window(da: xr.DataArray, freq: str) -> int | None:
+    """Steps per period when every period of ``freq`` holds the same steps in order.
+
+    True for regular sub-daily series aggregated to days or to coarser
+    sub-daily bins (a day has 24 hours in every calendar), when the series
+    starts at the beginning of a period: then the k-th window of ``window``
+    steps is the k-th period present, and ``coarsen`` gives the same sums as a
+    resample. The last period may be partial. None otherwise.
+    """
+    if freq != "D" and _hours(freq) is None:
+        return None
+    codes = _codes(da, freq)
+    if codes.size < 2:
+        return None
+    starts = np.flatnonzero(np.concatenate([[True], codes[1:] != codes[:-1]]))
+    runs = np.diff(np.concatenate([starts, [codes.size]]))
+    window = int(runs[0])
+    if window < 2 or np.any(runs[:-1] != window) or runs[-1] > window:
+        return None
+    if np.unique(codes).size != runs.size:
+        return None  # a period occurs twice: not sorted
+    if da.chunks is not None:
+        chunks = np.asarray(da.chunksizes["time"][:-1])
+        if np.any(chunks % window):
+            return None
+    return window
+
+
+def _window_block(block: np.ndarray, window: int, axis: int, what: str) -> np.ndarray:
+    """NaN-skipping sum, or count of valid values, over consecutive windows along ``axis``."""
+    x = np.asarray(block, dtype=np.float64)
+    n = x.shape[axis]
+    m = -(-n // window)
+    if m * window != n:
+        pad_shape = list(x.shape)
+        pad_shape[axis] = m * window - n
+        x = np.concatenate([x, np.full(pad_shape, np.nan)], axis=axis)
+    x = x.reshape(x.shape[:axis] + (m, window) + x.shape[axis + 1 :])
+    if what == "sum":
+        out: np.ndarray = np.nansum(x, axis=axis + 1)
+        return out
+    counted: np.ndarray = np.sum(~np.isnan(x), axis=axis + 1).astype(np.float64)
+    return counted
+
+
+def _window_reduce(da: xr.DataArray, window: int, what: str, labels: np.ndarray) -> xr.DataArray:
+    """Sum or count over windows of ``window`` time steps, one task per dask chunk.
+
+    The time chunks hold whole windows (only the last chunk may end with a
+    partial one), so each chunk reduces on its own; the data are read as
+    float64. NumPy arrays go through the same function.
+    """
+    axis = da.get_axis_num("time")
+    assert isinstance(axis, int)
+    if da.chunks is None:
+        data: Any = _window_block(np.asarray(da.values), window, axis, what)
+    else:
+        import dask.array as dsa
+
+        chunks = list(da.data.chunks)
+        chunks[axis] = tuple(-(-c // window) for c in chunks[axis])
+        data = dsa.map_blocks(  # type: ignore[no-untyped-call]
+            _window_block,
+            da.data,
+            window,
+            axis,
+            what,
+            chunks=tuple(chunks),
+            dtype=np.float64,
+            meta=np.array((), dtype=np.float64),
+        )
+    coords = {name: c for name, c in da.coords.items() if "time" not in c.dims}
+    out = xr.DataArray(data, dims=da.dims, coords=coords, name=da.name)
+    labelled: xr.DataArray = out.assign_coords(time=labels)
+    return labelled
+
+
+def _period_chunks(da: xr.DataArray, freq: str) -> xr.DataArray:
+    """Rechunk a dask array along time so that chunks hold whole periods of ``freq``.
+
+    Chunks are filled with consecutive periods up to dask's ``array.chunk-size``
+    (at least one period each), so every chunk reduces on its own and the
+    aggregation does not combine partial periods across chunks. Arrays whose
+    time chunks are already that large or larger are left alone.
+    """
+    if da.chunks is None:
+        return da
+    field = int(np.prod([max(c) for d, c in da.chunksizes.items() if d != "time"]))
+    field_bytes = max(1, field) * 8
+    per_chunk = max(1, chunk_limit_bytes() // field_bytes)
+    if min(da.chunksizes["time"]) >= per_chunk:
+        return da
+    codes = _codes(da, freq)
+    starts = np.flatnonzero(np.concatenate([[True], codes[1:] != codes[:-1]]))
+    runs = np.diff(np.concatenate([starts, [codes.size]]))
+    chunks: list[int] = []
+    current = 0
+    for run in runs.tolist():
+        if current and current + run > per_chunk:
+            chunks.append(current)
+            current = 0
+        current += run
+    if current:
+        chunks.append(current)
+    out: xr.DataArray = da.chunk({"time": tuple(chunks)})
     return out
 
 
 def _describe_range(da: xr.DataArray) -> str:
     t = da["time"].values
+    if t.size == 0:
+        return f"no time step left, calendar {calendar(da)}"
     return f"{t[0]} to {t[-1]}, calendar {calendar(da)}"
 
 
@@ -396,24 +524,52 @@ def _aggregate(
     step: float | None,
     min_coverage: float,
 ) -> tuple[xr.DataArray, dict[str, Any]]:
-    """Time mean onto ``freq``; values below ``min_coverage`` set to NaN."""
+    """Time mean onto ``freq``; values below ``min_coverage`` set to NaN.
+
+    Dask arrays are first rechunked so that chunks hold whole periods. A
+    regular sub-daily series whose periods all hold the same number of steps
+    (hourly to daily, say) is then reduced with ``coarsen``, one task per chunk;
+    other series are resampled through flox (a core dependency), which also
+    reduces each chunk in place instead of building one chunk per period. The
+    sums are rechunked to whole fields and dask's automatic size along time
+    before any further arithmetic, so later steps do not carry one small chunk
+    per day.
+    """
     cftime = _is_cftime(da)
     cal = calendar(da)
     rfreq = _pandas_freq(freq)
-    valid = da.notnull()
-    if native == "MS":
-        days = da["time"].dt.days_in_month.astype(float)
-        num = (da * days).resample(time=rfreq).sum(skipna=True, min_count=1)
-        den = days.where(valid).resample(time=rfreq).sum(skipna=True, min_count=1)
-        out = num / den
-        valid_amount = den.fillna(0.0)
-        how = "month-length weighted mean"
-    else:
-        out = da.resample(time=rfreq).mean()
-        valid_amount = valid.astype(float).resample(time=rfreq).sum()
-        how = "mean"
+    da = _period_chunks(da, freq)
     ones = xr.DataArray(np.ones(da.sizes["time"]), dims="time", coords={"time": da["time"].values})
-    counts = np.asarray(ones.resample(time=rfreq).count().values, dtype=float)
+    per_period = ones.resample(time=rfreq).count()
+    window = _fixed_window(da, freq) if native != "MS" else None
+    if window is not None:
+        present = np.asarray(per_period.values) > 0
+        period_labels = np.asarray(per_period["time"].values)[present]
+        counts = np.asarray(per_period.values, dtype=float)[present]
+        total = field_chunks(_window_reduce(da, window, "sum", period_labels))
+        valid_amount = field_chunks(_window_reduce(da, window, "count", period_labels))
+        out = total / valid_amount.where(valid_amount > 0)
+        how = "mean"
+    else:
+        counts = np.asarray(per_period.values, dtype=float)
+        # Sums in float64, so lazy and eager runs of float32 data agree.
+        da = da.astype(np.float64) if da.dtype != np.float64 else da
+        if native == "MS":
+            days = da["time"].dt.days_in_month.astype(float)
+            valid = da.notnull()
+            num = field_chunks((da * days).resample(time=rfreq).sum(skipna=True, min_count=1))
+            den = field_chunks(days.where(valid).resample(time=rfreq).sum(skipna=True, min_count=1))
+            out = num / den
+            valid_amount = den.fillna(0.0)
+            how = "month-length weighted mean"
+        else:
+            # Two flox reductions (sum and count of the valid values), each one
+            # task per input chunk; the results are rechunked to whole fields
+            # before any further arithmetic, so that arithmetic has few chunks.
+            total = field_chunks(da.resample(time=rfreq).sum(skipna=True))
+            valid_amount = field_chunks(da.resample(time=rfreq).count()).astype(np.float64)
+            out = total / valid_amount.where(valid_amount > 0)
+            how = "mean"
     labels = np.asarray(out["time"].values)
     info: dict[str, Any] = {
         "aggregation": how,
@@ -437,8 +593,14 @@ def _aggregate(
         info["incomplete_periods_dropped"] = dropped
         expected = xr.DataArray(expected_amount, dims="time", coords={"time": out["time"].values})
         out = out.where(valid_amount >= min_coverage * expected - 1e-9)
+        if not complete.any():
+            raise NoOverlapError(
+                f"No {freq_name(freq)} period of the input ({_describe_range(da)}) holds at "
+                f"least {min_coverage:g} of its expected time steps, so nothing is left after "
+                "aggregation. Lower min_coverage or choose a finer freq="
+            )
         if not complete.all():
-            out = out.isel(time=np.nonzero(complete)[0])
+            out = take_time(out, np.nonzero(complete)[0])
     out = out.assign_attrs(da.attrs)
     out.name = da.name
     return out, info
@@ -543,6 +705,19 @@ def align_time(
             )
         target = max((i.freq for i in infos.values() if i.freq), key=nominal_days)
     record["frequency"] = freq_name(target)
+    cals = record["calendars"]
+    if (target == "D" or _hours(target) is not None) and (
+        (cals["reference"] == "360_day") != (cals["candidate"] == "360_day")
+    ):
+        msg = (
+            f"The reference calendar is {cals['reference']} and the candidate calendar is "
+            f"{cals['candidate']}. {freq_name(target).capitalize()} values are matched by "
+            "date label, so 30 February and every 31st day drop out and the same label "
+            "falls at a different point of the seasonal cycle in the two calendars. Pass "
+            "freq='MS' to compare monthly means, which do not depend on the calendar."
+        )
+        warnings.warn(msg, UserWarning, stacklevel=3)
+        record["calendar_note"] = msg
 
     out = []
     aggregated: list[str] = []
@@ -625,8 +800,8 @@ def align_time(
     record["method"] = (
         f"periods matched by calendar labels ({_label_name(target)}), not by timestamp"
     )
-    reference = reference.isel(time=idx_r)
-    candidate = candidate.isel(time=idx_c)
+    reference = take_time(reference, idx_r)
+    candidate = take_time(candidate, idx_c)
     candidate = candidate.assign_coords(time=reference["time"].values)
     record["range"] = [str(reference["time"].values[0]), str(reference["time"].values[-1])]
     record["target_freq"] = target

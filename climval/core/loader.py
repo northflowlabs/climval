@@ -71,6 +71,7 @@ _PRESETS: dict[str, dict[str, Any]] = {
 # Loader
 # ---------------------------------------------------------------------------
 
+
 def load_model(
     preset: str | None = None,
     *,
@@ -141,9 +142,7 @@ def load_model(
     # Apply preset defaults
     if preset is not None:
         if preset not in _PRESETS:
-            raise ValueError(
-                f"Unknown preset '{preset}'. Available: {list(_PRESETS.keys())}"
-            )
+            raise ValueError(f"Unknown preset '{preset}'. Available: {list(_PRESETS.keys())}")
         p = _PRESETS[preset]
         model_type = p["model_type"]
         spatial_resolution = p["spatial_resolution"]
@@ -212,8 +211,5 @@ def _check_file(path: Path | str) -> None:
         raise FileNotFoundError(f"Data file not found: {path}")
     suffix = path.suffix.lower()
     if suffix not in {".nc", ".nc4", ".csv", ".zarr"}:
-        raise ValueError(
-            f"Unsupported file format '{suffix}'. "
-            "Supported: .nc, .nc4, .csv, .zarr"
-        )
+        raise ValueError(f"Unsupported file format '{suffix}'. Supported: .nc, .nc4, .csv, .zarr")
     logger.debug("Validated data file: %s (%d bytes)", path, path.stat().st_size)

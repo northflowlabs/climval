@@ -221,8 +221,7 @@ def _csv_stations(frame: Any, time_col: Any, lat_col: Any, lon_col: Any) -> xr.D
     value_cols = [
         c
         for c in frame.columns
-        if c not in (time_col, lat_col, lon_col, id_col)
-        and pd.api.types.is_numeric_dtype(frame[c])
+        if c not in (time_col, lat_col, lon_col, id_col) and pd.api.types.is_numeric_dtype(frame[c])
     ]
     index = [id_col] if time_col is None else [time_col, id_col]
     ds = frame.set_index(index)[value_cols].to_xarray()

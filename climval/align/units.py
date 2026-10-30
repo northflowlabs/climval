@@ -4,8 +4,9 @@ The candidate is converted to the reference's units. A small built-in table
 covers the common climate cases without any dependency:
 
 * temperature: K, degC, degF
-* precipitation flux: kg m-2 s-1, mm s-1, mm h-1, mm day-1 (liquid water,
-  1 kg m-2 equals 1 mm)
+* precipitation flux: kg m-2 s-1, kg m-2 h-1, kg m-2 d-1, mm s-1, mm h-1,
+  mm day-1 (liquid water, 1 kg m-2 equals 1 mm). Amounts per month are not
+  in the table, because a month has no fixed length.
 * pressure: Pa, hPa (mbar), kPa
 * fraction: 1, %
 * speed: m s-1, km h-1
@@ -35,6 +36,8 @@ _TABLE: dict[str, tuple[str, float, float]] = {
     "kg m-2 s-1": ("precipitation_flux", 1.0, 0.0),
     "mm h-1": ("precipitation_flux", 1.0 / 3600.0, 0.0),
     "mm day-1": ("precipitation_flux", 1.0 / 86400.0, 0.0),
+    "kg m-2 h-1": ("precipitation_flux", 1.0 / 3600.0, 0.0),
+    "kg m-2 d-1": ("precipitation_flux", 1.0 / 86400.0, 0.0),
     "Pa": ("pressure", 1.0, 0.0),
     "hPa": ("pressure", 100.0, 0.0),
     "kPa": ("pressure", 1000.0, 0.0),
@@ -51,7 +54,6 @@ _ALIASES: dict[str, tuple[str, ...]] = {
         "degC",
         "deg_C",
         "°C",
-        "C",
         "celsius",
         "degrees_C",
         "degree_C",
@@ -74,6 +76,18 @@ _ALIASES: dict[str, tuple[str, ...]] = {
         "mm s^-1",
     ),
     "mm h-1": ("mm h-1", "mm/h", "mm/hr", "mm hr-1", "mm h^-1"),
+    "kg m-2 h-1": ("kg m-2 h-1", "kg m^-2 h^-1", "kg m**-2 h**-1", "kg/m2/h", "kg/m^2/h"),
+    "kg m-2 d-1": (
+        "kg m-2 d-1",
+        "kg m-2 day-1",
+        "kg m^-2 d^-1",
+        "kg m^-2 day^-1",
+        "kg m**-2 d**-1",
+        "kg m**-2 day**-1",
+        "kg/m2/d",
+        "kg/m2/day",
+        "kg/m^2/day",
+    ),
     "mm day-1": (
         "mm day-1",
         "mm/day",
@@ -260,6 +274,12 @@ def harmonise_units(
             f"checked against each other. Declare it with units={{'{missing}': '...'}} "
             "or pass units='ignore'."
         )
+    for role, u in (("reference", ru), ("candidate", cu)):
+        if _squash(u) == "C":
+            raise UnitsError(
+                f"The {role} has units 'C', which is the coulomb in UDUNITS and CF. Write "
+                f"'degC' for degrees Celsius, or declare it with units={{'{role}': 'degC'}}."
+            )
     reference = reference.assign_attrs(units=ru)
     if same_units(ru, cu):
         record["action"] = "units match"

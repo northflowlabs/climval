@@ -108,8 +108,36 @@ class Comparison:
                 "dimension, rounded to 36 mantissa bits"
             ),
         }
+        self._note_undefined_percentiles()
         self._computed = True
         return self
+
+    def _note_undefined_percentiles(self) -> None:
+        """Record percentile biases left NaN because the reference quantile is near zero."""
+        found: dict[str, dict[str, list[str]]] = {}
+        for sample, ds in self.samples.items():
+            if "n_points" not in ds:
+                continue
+            for name in ds.data_vars:
+                if not str(name).startswith("percentile_bias"):
+                    continue
+                undefined = ds[name].isnull() & (ds["n_points"] > 0)
+                if "group" not in undefined.dims or not bool(undefined.any()):
+                    continue
+                groups = [
+                    str(g) for g in undefined["group"].values if bool(undefined.sel(group=g).any())
+                ]
+                found.setdefault(sample, {})[str(name)] = groups
+        if found:
+            notes = self.provenance.setdefault("metric_notes", {})
+            notes["percentile_bias_undefined"] = {
+                "rule": (
+                    "NaN where the reference percentile is below 1% of the reference's "
+                    "weighted mean absolute value (min_relative), for example the 5th "
+                    "percentile of daily precipitation, which is near zero"
+                ),
+                "groups": found,
+            }
 
     def _require_computed(self) -> None:
         if not self._computed:

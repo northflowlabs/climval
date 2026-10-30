@@ -56,46 +56,127 @@ from __future__ import annotations
 import math
 import re
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from typing import Any
 
 import numpy as np
 import xarray as xr
+
+from climval._chunking import chunk_limit_bytes
 
 # ---------------------------------------------------------------------------
 # Weighted building blocks
 # ---------------------------------------------------------------------------
 
 
+CONSTANT_RTOL = 1e-10
+"""A sample counts as constant when its weighted standard deviation is at most
+this fraction of its weighted mean absolute value. The two-pass standard
+deviation of a constant field is not exactly zero (about 1e-16 of the value),
+so a test for ``std > 0`` would divide by rounding noise."""
+
+_MEMO: dict[tuple[Any, ...], tuple[Any, tuple[Any, ...]]] | None = None
+
+
+@contextmanager
+def shared_reductions() -> Iterator[None]:
+    """Reuse weighted means, standard deviations and covariances inside the block.
+
+    The metrics of one sample share their inputs, so the weighted mean of the
+    reference, say, is built once and not once per metric. This keeps the dask
+    graph, and the time to build it, small when many metrics and groups are
+    evaluated.
+    """
+    global _MEMO
+    previous = _MEMO
+    _MEMO = {}
+    try:
+        yield
+    finally:
+        _MEMO = previous
+
+
+def _memo(
+    kind: str, fn: Callable[[], xr.DataArray], *objs: Any, dims: Sequence[str]
+) -> xr.DataArray:
+    if _MEMO is None:
+        return fn()
+    key = (kind, *(id(o) for o in objs), tuple(dims))
+    hit = _MEMO.get(key)
+    if hit is not None:
+        out: xr.DataArray = hit[0]
+        return out
+    value = fn()
+    # Keep the inputs alive with the value, so their ids cannot be reused.
+    _MEMO[key] = (value, objs)
+    return value
+
+
 def _total(w: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
-    tot = w.sum(dims)
-    out: xr.DataArray = tot.where(tot > 0)
-    return out
+    def build() -> xr.DataArray:
+        tot = w.sum(dims)
+        out: xr.DataArray = tot.where(tot > 0)
+        return out
+
+    return _memo("total", build, w, dims=dims)
 
 
 def wmean(x: xr.DataArray, w: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
     """Weighted mean over ``dims``; points with zero weight do not count."""
-    out: xr.DataArray = (x.fillna(0.0) * w).sum(dims) / _total(w, dims)
-    return out
+
+    def build() -> xr.DataArray:
+        out: xr.DataArray = (x.fillna(0.0) * w).sum(dims) / _total(w, dims)
+        return out
+
+    return _memo("mean", build, x, w, dims=dims)
 
 
 def wvar(x: xr.DataArray, w: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
-    m = wmean(x, w, dims)
-    return wmean((x - m) ** 2, w, dims)
+    return _memo("var", lambda: wmean((x - wmean(x, w, dims)) ** 2, w, dims), x, w, dims=dims)
 
 
 def wstd(x: xr.DataArray, w: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
-    return np.sqrt(wvar(x, w, dims))  # type: ignore[return-value]
+    return _memo("std", lambda: np.sqrt(wvar(x, w, dims)), x, w, dims=dims)  # type: ignore[arg-type,return-value]
+
+
+def wscale(x: xr.DataArray, w: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
+    """Weighted mean absolute value: the scale against which a std or a quantile is small."""
+    return _memo("scale", lambda: wmean(abs(x), w, dims), x, w, dims=dims)
+
+
+def varies(x: xr.DataArray, w: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
+    """True where ``x`` is not constant over ``dims`` (see :data:`CONSTANT_RTOL`)."""
+
+    def build() -> xr.DataArray:
+        out: xr.DataArray = wstd(x, w, dims) > CONSTANT_RTOL * wscale(x, w, dims)
+        return out
+
+    return _memo("varies", build, x, w, dims=dims)
 
 
 def wcov(a: xr.DataArray, b: xr.DataArray, w: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
-    return wmean((a - wmean(a, w, dims)) * (b - wmean(b, w, dims)), w, dims)
+    return _memo(
+        "cov",
+        lambda: wmean((a - wmean(a, w, dims)) * (b - wmean(b, w, dims)), w, dims),
+        a,
+        b,
+        w,
+        dims=dims,
+    )
 
 
 def wcorr(a: xr.DataArray, b: xr.DataArray, w: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
-    sa, sb = wstd(a, w, dims), wstd(b, w, dims)
-    out: xr.DataArray = (wcov(a, b, w, dims) / (sa * sb)).where((sa > 0) & (sb > 0))
-    return out
+    """Weighted Pearson correlation; NaN when either input is constant."""
+
+    def build() -> xr.DataArray:
+        sa, sb = wstd(a, w, dims), wstd(b, w, dims)
+        out: xr.DataArray = (wcov(a, b, w, dims) / (sa * sb)).where(
+            varies(a, w, dims) & varies(b, w, dims)
+        )
+        return out
+
+    return _memo("corr", build, a, b, w, dims=dims)
 
 
 def _gather(x: xr.DataArray, dims: Sequence[str]) -> xr.DataArray:
@@ -126,17 +207,6 @@ def _stack(x: xr.DataArray, dims: Sequence[str], name: str) -> xr.DataArray:
 def sample_bytes(x: xr.DataArray, dims: Sequence[str]) -> int:
     """Bytes of one full sample over ``dims`` in float64."""
     return int(math.prod(int(x.sizes[d]) for d in dims)) * 8
-
-
-def chunk_limit_bytes() -> int:
-    """dask's ``array.chunk-size`` in bytes (128 MiB when dask is not configured)."""
-    try:
-        import dask
-        from dask.utils import parse_bytes
-
-        return int(parse_bytes(dask.config.get("array.chunk-size")))
-    except Exception:  # noqa: BLE001
-        return 128 * 2**20
 
 
 def _warn_full_sample(name: str, x: xr.DataArray, dims: Sequence[str]) -> None:
@@ -350,7 +420,8 @@ class NormalizedRMSE(BaseMetric):
     """Normalised RMSE: RMSE divided by the weighted standard deviation of the reference.
 
     Values below 1 mean the error is smaller than the reference's variability
-    over the same sample. NaN when the reference is constant.
+    over the same sample. NaN when the reference is constant (its standard
+    deviation at most :data:`CONSTANT_RTOL` of its mean absolute value).
     """
 
     name = "nrmse"
@@ -366,7 +437,7 @@ class NormalizedRMSE(BaseMetric):
     ) -> xr.DataArray:
         sr = wstd(reference, weights, dims)
         rmse = RMSE().reduce(reference, candidate, weights, dims)
-        out: xr.DataArray = (rmse / sr).where(sr > 0)
+        out: xr.DataArray = (rmse / sr).where(varies(reference, weights, dims))
         return out
 
 
@@ -376,7 +447,10 @@ class NormalizedRMSE(BaseMetric):
 
 
 class PearsonCorrelation(BaseMetric):
-    """Pearson correlation: weighted covariance over the product of weighted standard deviations."""
+    """Pearson correlation: weighted covariance over the product of weighted standard deviations.
+
+    NaN when either input is constant over the sample.
+    """
 
     name = "pearson_r"
     higher_is_better = True
@@ -418,8 +492,9 @@ class SpearmanCorrelation(BaseMetric):
     """Spearman rank correlation: weighted Pearson correlation of the ranks.
 
     Ranks are unweighted (ties get the average rank) and computed over the
-    valid points of the sample; the correlation of the ranks uses the
-    weights. This matches xskillscore.spearman_r.
+    valid points of the sample with a weight above zero; the correlation of
+    the ranks uses the weights. For points with positive weights this
+    matches xskillscore.spearman_r.
     """
 
     name = "spearman_r"
@@ -436,14 +511,19 @@ class SpearmanCorrelation(BaseMetric):
     ) -> xr.DataArray:
         stack = "_climval_sample"
         _warn_full_sample(self.name, reference, dims)
-        r = _gather(_stack(reference, dims, stack), [stack])
-        c = _gather(_stack(candidate, dims, stack), [stack])
+        # Points with zero weight (outside a mask, or a missing area) are not ranked.
+        counted = weights.broadcast_like(reference) > 0
+        r = _gather(_stack(reference.where(counted), dims, stack), [stack])
+        c = _gather(_stack(candidate.where(counted), dims, stack), [stack])
         w = _gather(_stack(weights.broadcast_like(reference), dims, stack), [stack])
         return wcorr(_rank(r, stack), _rank(c, stack), w, [stack])
 
 
 class StdRatio(BaseMetric):
-    """Standard deviation ratio: weighted std of the candidate over that of the reference."""
+    """Standard deviation ratio: weighted std of the candidate over that of the reference.
+
+    NaN when the reference is constant over the sample.
+    """
 
     name = "std_ratio"
     higher_is_better = False  # best value is 1
@@ -457,7 +537,9 @@ class StdRatio(BaseMetric):
         dims: Sequence[str],
     ) -> xr.DataArray:
         sr = wstd(reference, weights, dims)
-        out: xr.DataArray = (wstd(candidate, weights, dims) / sr).where(sr > 0)
+        out: xr.DataArray = (wstd(candidate, weights, dims) / sr).where(
+            varies(reference, weights, dims)
+        )
         return out
 
 
@@ -472,7 +554,8 @@ class TaylorSkillScore(BaseMetric):
     S = 4 (1 + R)**4 / ((s + 1/s)**2 (1 + R0)**4), with R the weighted Pearson
     correlation, s the standard deviation ratio (candidate over reference)
     and R0 the highest attainable correlation (default 1). S is 1 for a
-    perfect pattern and tends to 0 as the pattern degrades.
+    perfect pattern and tends to 0 as the pattern degrades. NaN when either
+    input is constant over the sample.
     """
 
     name = "taylor_skill_score"
@@ -493,7 +576,9 @@ class TaylorSkillScore(BaseMetric):
         sr, sc = wstd(reference, weights, dims), wstd(candidate, weights, dims)
         s = sc / sr
         score = 4.0 * (1.0 + r) ** 4 / ((s + 1.0 / s) ** 2 * (1.0 + self.r0) ** 4)
-        out: xr.DataArray = score.where((sr > 0) & (sc > 0))
+        out: xr.DataArray = score.where(
+            varies(reference, weights, dims) & varies(candidate, weights, dims)
+        )
         return out
 
 
@@ -505,7 +590,9 @@ class KlingGuptaEfficiency(BaseMetric):
     the ratio of weighted means (candidate over reference). beta depends on
     the zero of the unit scale; :func:`climval.compare` computes KGE for
     temperatures in degC or degF on the Kelvin scale. KGE was designed for
-    ratio-scale variables such as precipitation or runoff.
+    ratio-scale variables such as precipitation or runoff. NaN when either
+    input is constant over the sample, or when the reference's mean is at
+    most :data:`CONSTANT_RTOL` of its mean absolute value.
     """
 
     name = "kge"
@@ -526,7 +613,10 @@ class KlingGuptaEfficiency(BaseMetric):
         alpha = wstd(candidate, weights, dims) / sr
         beta = wmean(candidate, weights, dims) / mr
         kge = 1.0 - np.sqrt((r - 1.0) ** 2 + (alpha - 1.0) ** 2 + (beta - 1.0) ** 2)
-        return kge.where((sr > 0) & (mr != 0))  # type: ignore[no-any-return]
+        ok = varies(reference, weights, dims) & (
+            abs(mr) > CONSTANT_RTOL * wscale(reference, weights, dims)
+        )
+        return kge.where(ok)  # type: ignore[no-any-return]
 
 
 HIST_MANTISSA_BITS = 20
@@ -547,7 +637,20 @@ def _unsortable(s: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(u).view(np.float64)
 
 
-Partial = list[tuple[np.ndarray, np.ndarray]]
+Partial = list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]
+"""Per side: bin keys, summed weights, and per kept point its row, minimum and maximum."""
+
+
+def _extremes(
+    rows: np.ndarray, mins: np.ndarray, maxs: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Minimum and maximum per row (rows need not be sorted)."""
+    if rows.size == 0:
+        return rows, mins, maxs
+    order = np.argsort(rows, kind="stable")
+    rows, mins, maxs = rows[order], mins[order], maxs[order]
+    starts = np.flatnonzero(np.concatenate([[True], rows[1:] != rows[:-1]]))
+    return rows[starts], np.minimum.reduceat(mins, starts), np.maximum.reduceat(maxs, starts)
 
 
 def _hist_block(
@@ -577,7 +680,9 @@ def _hist_block(
     for x in (r2, c2):
         keys = (rows[ok] << np.uint64(32)) | (_sortable(x[ok]) >> _SHIFT)
         uniq, inv = np.unique(keys, return_inverse=True)
-        out.append((uniq, np.bincount(inv.ravel(), weights=w2[ok], minlength=uniq.size)))
+        sums = np.bincount(inv.ravel(), weights=w2[ok], minlength=uniq.size)
+        ext = _extremes(rows[ok], x[ok], x[ok])
+        out.append((uniq, sums, *ext))
     return out
 
 
@@ -587,7 +692,8 @@ def _hist_merge(*parts: Partial) -> Partial:
         keys = np.concatenate([p[side][0] for p in parts])
         sums = np.concatenate([p[side][1] for p in parts])
         uniq, inv = np.unique(keys, return_inverse=True)
-        out.append((uniq, np.bincount(inv.ravel(), weights=sums, minlength=uniq.size)))
+        ext = _extremes(*(np.concatenate([p[side][k] for p in parts]) for k in (2, 3, 4)))
+        out.append((uniq, np.bincount(inv.ravel(), weights=sums, minlength=uniq.size), *ext))
     return out
 
 
@@ -595,7 +701,7 @@ def _hist_final(part: Partial, q: float, kept_shape: tuple[int, ...]) -> np.ndar
     n = int(math.prod(kept_shape))
     result = np.full((2, n), np.nan)
     for side in range(2):
-        keys, sums = part[side]
+        keys, sums, ext_rows, ext_min, ext_max = part[side]
         point = (keys >> np.uint64(32)).astype(np.int64)
         bins = keys & np.uint64(0xFFFFFFFF)
         starts = np.searchsorted(point, np.arange(n), side="left")
@@ -617,7 +723,10 @@ def _hist_final(part: Partial, q: float, kept_shape: tuple[int, ...]) -> np.ndar
             hi = float(_unsortable(np.asarray([(bins[a + j] + np.uint64(1)) << _SHIFT]))[0])
             if not np.isfinite(hi) or hi < lo:
                 hi = lo
-            result[side, i] = lo + frac * (hi - lo)
+            # The bin can reach beyond the sample; the quantile cannot.
+            e = int(np.searchsorted(ext_rows, np.uint64(i)))
+            value = lo + frac * (hi - lo)
+            result[side, i] = min(max(value, float(ext_min[e])), float(ext_max[e]))
     return result.reshape((2, *kept_shape))
 
 
@@ -633,10 +742,13 @@ def histogram_quantiles(
     Each chunk contributes a sparse weighted histogram whose bins keep the top
     20 mantissa bits of each value; the histograms are summed in a tree, and
     the quantile is the inverse of the weighted empirical distribution
-    function, interpolated linearly inside the bin where it falls. The bin
-    width bounds the error: at most 2**-20 (9.5e-7) of the quantile's
-    magnitude. Memory is bounded by the number of distinct bins, not by the
-    sample size.
+    function, interpolated linearly inside the bin where it falls and clipped
+    to the sample's minimum and maximum, which are tracked exactly. The result
+    lies in the same bin as the inverse of the weighted empirical
+    distribution function at q (the smallest value whose cumulative weight
+    reaches q of the total), so it differs from that value by at most the
+    bin width, 2**-20 (9.5e-7) of the quantile's magnitude. Memory is bounded
+    by the number of distinct bins, not by the sample size.
     """
     import dask.array as dsa
     from dask.delayed import delayed
@@ -682,9 +794,12 @@ class PercentileBias(BaseMetric):
     """Percentile bias: relative difference of a weighted percentile, in percent.
 
     100 * (Q_c - Q_r) / |Q_r|, with Q the weighted percentile of each sample.
-    NaN when Q_r is 0. Being relative to the reference value, it depends on
-    the unit's zero; :func:`climval.compare` computes it for temperatures in
-    degC or degF on the Kelvin scale.
+    NaN when |Q_r| is below ``min_relative`` (default 0.01) of the
+    reference's weighted mean absolute value: a quantile near zero, such as
+    the 5th percentile of daily precipitation, would turn a small absolute
+    difference into an arbitrarily large percentage. Being relative to the
+    reference value, it depends on the unit's zero; :func:`climval.compare`
+    computes it for temperatures in degC or degF on the Kelvin scale.
 
     Two ways to get Q, chosen per sample with ``method="auto"``:
 
@@ -693,16 +808,22 @@ class PercentileBias(BaseMetric):
         weights) on the whole sample, gathered into one dask chunk.
     ``"histogram"``
         :func:`histogram_quantiles`, one pass over the chunks with memory
-        bounded by the number of distinct value bins. Its error is at most
-        2**-20 of the quantile's magnitude plus the difference between the
-        weighted empirical distribution function and the linear method,
-        which is below one spacing between neighbouring sorted values.
+        bounded by the number of distinct value bins. It estimates the
+        inverse of the weighted empirical distribution function to within
+        2**-20 of the quantile's magnitude, clipped to the sample's range.
+        That is a different estimator from the exact method: for equal
+        weights the two differ by at most one spacing between neighbouring
+        sorted values (plus the bin width); for unequal weights xarray
+        interpolates between weighted order statistics in another way, and
+        the two can differ by a few spacings.
 
     ``"auto"`` (default) uses ``"exact"`` for NumPy arrays and for dask
     samples of at most ``max_exact_bytes`` (default: dask's
     ``array.chunk-size``, 128 MiB, which is 16.8 million float64 values),
-    and ``"histogram"`` above that. The method used is recorded in the
-    provenance under ``metric_methods``.
+    and ``"histogram"`` above that. ``method="exact"`` on a larger dask
+    sample warns, because it gathers the whole sample into one chunk. The
+    method used is recorded in the provenance under ``metric_methods``.
+    Points with zero weight are left out by both methods.
     """
 
     name = "percentile_bias"
@@ -716,6 +837,7 @@ class PercentileBias(BaseMetric):
         percentile: float = 95.0,
         method: str = "auto",
         max_exact_bytes: int | None = None,
+        min_relative: float = 0.01,
     ) -> None:
         if not 0.0 <= float(percentile) <= 100.0:
             raise ValueError(f"percentile must be between 0 and 100, got {percentile}")
@@ -724,6 +846,9 @@ class PercentileBias(BaseMetric):
         self.percentile = float(percentile)
         self.method = method
         self.max_exact_bytes = max_exact_bytes
+        if not 0.0 <= float(min_relative) < 1.0:
+            raise ValueError(f"min_relative must be in [0, 1), got {min_relative}")
+        self.min_relative = float(min_relative)
         self.name = f"percentile_bias_{_percentile_label(percentile)}"
 
     def method_for(self, reference: xr.DataArray, dims: Sequence[str]) -> str:
@@ -751,12 +876,17 @@ class PercentileBias(BaseMetric):
             ref_d = reference.chunk({d: -1 for d in reference.dims})
             qr, qc = histogram_quantiles(ref_d, candidate, weights, dims, q)
         else:
-            w = _gather(weights.broadcast_like(reference), dims)
-            qr = _gather(reference, dims).weighted(w).quantile(q, dim=dims)
-            qc = _gather(candidate, dims).weighted(w).quantile(q, dim=dims)
+            _warn_full_sample(self.name, reference, dims)
+            wb = weights.broadcast_like(reference)
+            counted = wb > 0
+            w = _gather(wb, dims)
+            qr = _gather(reference.where(counted), dims).weighted(w).quantile(q, dim=dims)
+            qc = _gather(candidate.where(counted), dims).weighted(w).quantile(q, dim=dims)
             qr = qr.drop_vars("quantile", errors="ignore")
             qc = qc.drop_vars("quantile", errors="ignore")
-        out: xr.DataArray = ((qc - qr) / abs(qr) * 100.0).where(qr != 0)
+        scale = wscale(reference, weights, dims)
+        far_from_zero = (abs(qr) > self.min_relative * scale) & (qr != 0)
+        out: xr.DataArray = ((qc - qr) / abs(qr) * 100.0).where(far_from_zero)
         out.attrs["climval_method"] = method
         return out
 

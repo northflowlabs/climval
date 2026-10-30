@@ -31,7 +31,7 @@ requirements:
   host:
     - python ${{ python_min }}.*
     - pip
-    - setuptools >=68
+    - setuptools >=77
     - wheel
   run:
     - python >=${{ python_min }}
@@ -42,6 +42,7 @@ requirements:
     - cftime >=1.6
     # dask-core with numpy covers pip's dask[array]
     - dask-core >=2023.6
+    - flox >=0.8
     - pyyaml >=6.0
     # needed on Python 3.10 only; a noarch recipe cannot depend on the Python version
     - tomli >=2.0

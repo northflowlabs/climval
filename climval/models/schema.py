@@ -34,15 +34,16 @@ class TemporalResolution(str, Enum):
 
 
 class SpatialResolution(str, Enum):
-    HIGH = "high"       # < 10 km
-    MEDIUM = "medium"   # 10 to 50 km
-    LOW = "low"         # > 50 km
+    HIGH = "high"  # < 10 km
+    MEDIUM = "medium"  # 10 to 50 km
+    LOW = "low"  # > 50 km
     GLOBAL = "global"
 
 
 @dataclass
 class SpatialDomain:
     """Geographic bounding box in decimal degrees."""
+
     lat_min: float
     lat_max: float
     lon_min: float
@@ -62,6 +63,7 @@ class SpatialDomain:
 @dataclass
 class TemporalDomain:
     """Time range for the model output."""
+
     start: datetime
     end: datetime
 
@@ -76,9 +78,10 @@ class TemporalDomain:
 @dataclass
 class ClimateVariable:
     """A single climate variable definition."""
-    name: str                        # e.g. "tas" (near-surface air temperature)
-    long_name: str                   # e.g. "Near-Surface Air Temperature"
-    units: str                       # e.g. "K"
+
+    name: str  # e.g. "tas" (near-surface air temperature)
+    long_name: str  # e.g. "Near-Surface Air Temperature"
+    units: str  # e.g. "K"
     standard_name: str | None = None  # CF convention
     description: str | None = None
 
@@ -130,6 +133,7 @@ class ClimateModel:
     """
     Represents a loaded climate model or dataset ready for benchmarking.
     """
+
     name: str
     model_type: ModelType
     variables: list[ClimateVariable]
@@ -167,6 +171,7 @@ class ClimateModel:
 @dataclass
 class MetricResult:
     """Result of a single metric computation between two models."""
+
     metric_name: str
     variable: str
     value: float
@@ -180,6 +185,7 @@ class MetricResult:
 @dataclass
 class BenchmarkResult:
     """Full benchmark result for a model pair."""
+
     reference: str
     candidate: str
     metrics: list[MetricResult] = field(default_factory=list)

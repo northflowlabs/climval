@@ -61,7 +61,15 @@ def _lon_widths(lon: np.ndarray, bounds: xr.DataArray | None) -> tuple[np.ndarra
     if bounds is not None:
         b = np.asarray(bounds.values, dtype=float)
         centres = np.round(np.mod(np.asarray(bounds[bounds.dims[0]].values, float), 360.0), 6)
-        width = dict(zip(centres.tolist(), np.abs(b[:, 1] - b[:, 0]).tolist(), strict=True))
+        # Bounds may wrap around the seam, for example (358.75, 1.25): the width
+        # is the difference modulo 360, and a zero difference is a full circle.
+        diff = np.mod(b[:, 1] - b[:, 0], 360.0)
+        if b.shape[0] > 1:
+            # Descending bounds (b1 < b0) give 360 minus the width modulo 360.
+            diff = np.minimum(diff, 360.0 - diff)
+        else:
+            diff = np.where(np.isclose(diff, 0.0), 360.0, diff)
+        width = dict(zip(centres.tolist(), diff.tolist(), strict=True))
         keys = np.round(np.mod(lon, 360.0), 6).tolist()
         if all(k in width for k in keys):
             return np.asarray([width[k] for k in keys]), "dataset bounds"

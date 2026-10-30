@@ -38,6 +38,8 @@ dependencies = [
     "cftime>=1.6",
     # Files open as dask arrays and every metric is computed in one dask pass.
     "dask[array]>=2023.6",
+    # Time aggregation (resampling) of dask arrays reduces chunk by chunk through flox.
+    "flox>=0.8",
     # climval check reads YAML and TOML configuration files.
     "pyyaml>=6.0",
     "tomli>=2.0; python_version < '3.11'",

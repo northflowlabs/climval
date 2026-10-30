@@ -31,6 +31,7 @@ from climval.models.schema import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def rng() -> np.random.Generator:
     return np.random.default_rng(0)
@@ -59,6 +60,7 @@ def candidate_model() -> ClimateModel:
 # ---------------------------------------------------------------------------
 # Metric unit tests
 # ---------------------------------------------------------------------------
+
 
 class TestRMSE:
     def test_identical_arrays(self) -> None:
@@ -170,12 +172,18 @@ class TestPercentileBias:
 # Registry
 # ---------------------------------------------------------------------------
 
+
 class TestMetricRegistry:
     def test_all_defaults_registered(self) -> None:
         expected = {
-            "rmse", "mae", "mean_bias", "nrmse",
-            "pearson_r", "taylor_skill_score",
-            "percentile_bias_p95", "percentile_bias_p5",
+            "rmse",
+            "mae",
+            "mean_bias",
+            "nrmse",
+            "pearson_r",
+            "taylor_skill_score",
+            "percentile_bias_p95",
+            "percentile_bias_p5",
         }
         assert expected.issubset(set(METRIC_REGISTRY.keys()))
 
@@ -191,6 +199,7 @@ class TestMetricRegistry:
 # ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
+
 
 class TestLoadModel:
     def test_preset_era5(self, reference_model: ClimateModel) -> None:
@@ -210,9 +219,7 @@ class TestLoadModel:
             load_model(preset="not_a_real_preset")
 
     def test_temporal_domain(self, reference_model: ClimateModel) -> None:
-        assert reference_model.temporal_domain.duration_years() == pytest.approx(
-            11.0, abs=0.1
-        )
+        assert reference_model.temporal_domain.duration_years() == pytest.approx(11.0, abs=0.1)
 
     def test_custom_variable_subset(self) -> None:
         model = load_model(name="minimal", variables=["tas"])
@@ -224,10 +231,9 @@ class TestLoadModel:
 # Suite + Report
 # ---------------------------------------------------------------------------
 
+
 class TestBenchmarkSuite:
-    def test_basic_run(
-        self, reference_model: ClimateModel, candidate_model: ClimateModel
-    ) -> None:
+    def test_basic_run(self, reference_model: ClimateModel, candidate_model: ClimateModel) -> None:
         suite = BenchmarkSuite(name="test-suite")
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
@@ -294,9 +300,7 @@ class TestBenchmarkSuite:
         self, reference_model: ClimateModel, candidate_model: ClimateModel
     ) -> None:
         suite = (
-            BenchmarkSuite()
-            .register(reference_model, role="reference")
-            .register(candidate_model)
+            BenchmarkSuite().register(reference_model, role="reference").register(candidate_model)
         )
         report = suite.run(synthetic=True, n_samples=50)
         assert len(report.results) == 1
@@ -458,8 +462,9 @@ class TestSuiteOnRealData:
         assert units["rmse"] == "K" and units["pearson_r"] == "1"
         d = report.to_dict()
         assert d["results"][0]["provenance"]["tas"]["steps"]
-        xr.testing.assert_allclose(result.comparisons["tas"].candidate.isel(time=0),
-                                   expected.candidate.isel(time=0))
+        xr.testing.assert_allclose(
+            result.comparisons["tas"].candidate.isel(time=0), expected.candidate.isel(time=0)
+        )
 
     def test_run_on_in_memory_data_with_options(self) -> None:
         import climval

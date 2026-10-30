@@ -23,6 +23,7 @@ compared by sampling the grid at the station locations.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal
 
 import numpy as np
@@ -158,6 +159,11 @@ def regrid(
     record["source_grid"] = {d: summarise_axis(source[d].values) for d in target}
 
     if method == "conservative":
+        for d, v in target.items():
+            _, _, n_beyond = _clamp(source[d].values, v, d)
+            if n_beyond == np.size(v):
+                record["no_overlap"] = f"every target {d} lies outside the source cells"
+                return source, record
         out = _xesmf(source, target, curvilinear=False, periodic=periodic)
         record["periodic"] = periodic
         record["action"] = "conservative remapping with xESMF (conservative_normed)"
@@ -192,6 +198,13 @@ def regrid(
             f"{method} samples the source at the target points and does not average "
             "over target cells; regrid='conservative' gives cell means"
         )
+        warnings.warn(
+            f"The {role} is regridded onto a coarser grid with {method}, which samples it "
+            "at the target points and does not average over the target cells. "
+            "regrid='conservative' (xESMF) gives cell means.",
+            UserWarning,
+            stacklevel=3,
+        )
 
     clamped: dict[str, np.ndarray] = {}
     moved: dict[str, int] = {}
@@ -202,7 +215,7 @@ def regrid(
     record["target_points_in_edge_half_cell"] = moved
 
     interp_method: Literal["linear", "nearest"] = "linear" if method == "bilinear" else "nearest"
-    out = source.interp(
+    out = _whole_fields(source, list(clamped)).interp(
         {d: v for d, v in clamped.items()},
         method=interp_method,
         assume_sorted=True,
@@ -223,6 +236,21 @@ def regrid(
     return out, record
 
 
+def _whole_fields(source: xr.DataArray, dims: list[str]) -> xr.DataArray:
+    """A dask source rechunked to whole fields along ``dims`` and automatic chunks along time.
+
+    Interpolating a source chunked in small horizontal tiles makes dask split
+    the output into many tiny chunks (one per tile and time step).
+    """
+    if source.chunks is None:
+        return source
+    spec: dict[str, Any] = {d: -1 for d in dims if d in source.dims}
+    if "time" in source.dims:
+        spec["time"] = "auto"
+    out: xr.DataArray = source.chunk(spec)
+    return out
+
+
 def _sample_points(
     source: xr.DataArray, target: dict[str, np.ndarray], method: str, record: dict[str, Any]
 ) -> tuple[xr.DataArray, dict[str, Any]]:
@@ -237,7 +265,7 @@ def _sample_points(
     for d, v in target.items():
         clamped[d], _, beyond[d] = _clamp(source[d].values, v, d)
     interp_method: Literal["linear", "nearest"] = "linear" if method == "bilinear" else "nearest"
-    out = source.interp(
+    out = _whole_fields(source, list(clamped)).interp(
         {d: xr.DataArray(v, dims="station") for d, v in clamped.items()},
         method=interp_method,
         assume_sorted=True,

@@ -30,7 +30,12 @@ from climval.align.units import absolute_offset, canonical
 from climval.errors import AlignmentError, MissingDependencyError
 from climval.metrics import PercentileBias, get_metric
 from climval.metrics.engine import evaluate
-from climval.metrics.stats import BaseMetric, histogram_quantiles, resolve_metrics
+from climval.metrics.stats import (
+    BaseMetric,
+    chunk_limit_bytes,
+    histogram_quantiles,
+    resolve_metrics,
+)
 
 
 def _block(times: Any, values: Any, units: str = "K", shape: tuple[int, int] = (2, 2)) -> Any:
@@ -384,8 +389,10 @@ class TestLargeSamples:
         assert st.attrs["climval_method"] == "histogram"
         assert out["climatology"]["percentile_bias_p95"].attrs["climval_method"] == "exact"
         # 0.2.0 built single 73 GB chunks here; no task input is that large now
-        graph = dict(st.data.__dask_graph__())
-        assert not any("rechunk" in str(k) for k in graph)
+        # The aligned arrays are rechunked to dask's automatic size, never gathered
+        aligned = pair.reference.data
+        biggest = int(np.prod([max(c) for c in aligned.chunks])) * 8
+        assert biggest <= 1.1 * chunk_limit_bytes()
         assert _graph_peak_bytes(pair, "percentile_bias_p95", ("space_time",)) < 300 * 2**20
 
     def test_c5_spearman_and_compute_only_metrics_do_not_allocate_index(self) -> None:
