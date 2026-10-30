@@ -1,7 +1,9 @@
 # Metrics
 
 Every metric is computed over the points of one [sample](samples.md) with
-weights \(w_i \ge 0\), which are zero where either input is missing.
+weights \(w_i \ge 0\), which are zero where either input is missing. A weight
+is the cell area, times the length of the time step in days for monthly and
+yearly data when the sample pools time steps.
 Differences are candidate minus reference. With the weighted mean
 
 \[
@@ -15,9 +17,12 @@ the weighted standard deviations and covariance are population values:
 \operatorname{cov}(r, c) = \langle (r - \langle r \rangle)(c - \langle c \rangle) \rangle .
 \]
 
-Every metric is an xarray reduction, so dask arrays stay lazy and one pass
-computes all values. The test suite checks the weighted metrics against
-xskillscore to 1e-10, with and without weights and missing values.
+Every metric is an xarray reduction, so dask arrays stay lazy and one
+`dask.compute` call computes all values. The test suite checks `rmse`, `mae`,
+`mean_bias`, `pearson_r` and `spearman_r` against xskillscore to a relative
+tolerance of 1e-10, with and without weights and missing values, and the
+metrics xskillscore does not have against independent NumPy definitions to
+1e-9.
 
 | Name | Definition | Units | Best |
 |---|---|---|---|
@@ -35,6 +40,14 @@ xskillscore to 1e-10, with and without weights and missing values.
 
 `n_points` (the number of valid points pooled) is reported with every sample.
 
+Metrics can be named by aliases wherever a name is taken (`metrics=`,
+thresholds, `climval check` files): `bias` and `me` for `mean_bias`,
+`pearson` for `pearson_r`, `spearman` for `spearman_r`, `tss` for
+`taylor_skill_score`, `centred_rmse` and `centered_rmse` for `crmse`. Results
+always use the canonical name. A percentile bias is named after its
+percentile, with `_` for a decimal point: `percentile_bias_p95`,
+`percentile_bias_p99_9` (`percentile_bias_p99.9` is read as the same metric).
+
 ## Notes on use
 
 - **Centred RMSE and the Taylor diagram.** `crmse`, `std_ratio` and
@@ -44,14 +57,25 @@ xskillscore to 1e-10, with and without weights and missing values.
   `climatology` sample alone. The total error splits as
   \(\mathrm{rmse}^2 = \mathrm{mean\_bias}^2 + \mathrm{crmse}^2\).
 - **Kling-Gupta efficiency** (Gupta et al. 2009) uses a ratio of means, which
-  depends on where zero is on the unit scale. It is meaningful for
-  ratio-scale variables such as precipitation or runoff, not for temperature
-  in degC.
-- **Percentile bias** (as used by Gleckler et al. 2008 for extremes) is
-  relative to the reference value and has the same caveat: use K for
-  temperature.
+  depends on where zero is on the unit scale. It was designed for
+  ratio-scale variables such as precipitation or runoff. `compare` computes
+  it for temperatures in degC or degF on the Kelvin scale, so the result
+  does not depend on the temperature unit.
+- **Percentile bias** is relative to the reference percentile and has the
+  same dependence on the zero; it is computed on the Kelvin scale in the same
+  way. On samples that fit in dask's `array.chunk-size` (128 MiB, 16.8
+  million float64 values) the percentile is exact; larger samples are
+  estimated in the same single pass from weighted histograms with bins
+  2**-20 of the value wide (`method="auto"`, the default). The error is at
+  most one bin width plus less than one gap between neighbouring sorted
+  values. `PercentileBias(95, method="exact")` forces the exact computation,
+  and the provenance records the method each sample used
+  (`metric_methods`).
 - **Spearman correlation** needs every point of the sample in memory at once.
   It is available by name and not computed by default.
+- **Errors in metrics.** An exception raised inside a metric reaches the
+  caller as the same exception type (on Python 3.11 and later with a note
+  naming the metric).
 
 ## Custom metrics
 

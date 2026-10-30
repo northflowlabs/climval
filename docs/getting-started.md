@@ -3,8 +3,8 @@
 ## Install
 
 ```bash
-pip install climval                      # NumPy, SciPy, pandas, xarray, cftime, PyYAML
-pip install "climval[cloud]"             # dask, Zarr, fsspec, gcsfs, s3fs
+pip install climval                      # NumPy, SciPy, pandas, xarray, dask, cftime, PyYAML
+pip install "climval[cloud]"             # Zarr, fsspec, gcsfs, s3fs
 pip install "climval[cloud,catalog]"     # plus intake-esm catalogues
 ```
 
@@ -47,9 +47,12 @@ result = climval.compare(
 )
 ```
 
-`compare` aligns the candidate with the reference (see
+`compare` puts both inputs on one grid (by default the coarser of the two),
+on common months and in the reference's units (see
 [Alignment](concepts/alignment.md)), computes every metric in one dask pass
-and returns a [`Comparison`](reference/compare.md).
+and returns a [`Comparison`](reference/compare.md). Spatial means are
+weighted by cell area and monthly steps by their length in days; with
+`by="season"` a December counts in the following winter's DJF.
 
 ## The result
 

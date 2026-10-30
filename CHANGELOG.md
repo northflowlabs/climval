@@ -95,8 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `load_model(data=...)` for xarray objects already in memory; remote URLs
   and Zarr directories as `path`
 - CLI: `climval compare` (with `--lat S,N` and `--lon W,E`, which accept
-  negative edges such as `--lat -60,-30`), `climval demo`,
-  `climval run --candidate-paths`
+  negative edges such as `--lat -60,-30`, `--min-coverage` and `--seasons`),
+  `climval demo`, `climval run --candidate-paths`
 - Extras: `cloud`, `regrid`, `units`, `regions`; Python 3.13 in CI. The
   `cftime` extra is kept as a no-op alias, because cftime is a core
   dependency
@@ -104,9 +104,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Python 3.10 and runs the tests
 - `climval check CONFIG`: a validation gate for CI. A YAML, TOML or JSON
   file declares checks (reference and candidate as paths, URLs or intake-esm
-  catalogue queries, variables, region, period, frequency, groups, regridding,
-  units, metrics, samples) and thresholds per metric, sample and group. The
-  file is validated before any data is opened. Output: console summary, JSON
+  catalogue queries, variables, region, period, frequency, `min_coverage`,
+  groups, `seasons`, regridding, target grid, units, weights, metrics,
+  samples) and thresholds per metric, sample and group; metrics may be named
+  by their aliases. The file is validated before any data is opened. Output:
+  console summary, JSON
   result, Markdown summary for `$GITHUB_STEP_SUMMARY` (`--github-summary`)
   and HTML report (`--output-dir`, `--json`, `--markdown`, `--html`). Exit
   code 0 when every threshold holds, 1 on a threshold failure, 2 on a
@@ -125,8 +127,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built strictly on every push and deployed from main
 - Examples on real open data, read anonymously from public cloud storage:
   ERA5 (ARCO-ERA5) against five CMIP6 historical models from the Pangeo
-  catalogue over Europe, scored in one call with Taylor diagrams; and the CI
-  gate on ERA5 and two CMIP6 models over the AR6 Northern Europe land region
+  catalogue over Europe, each on the coarser of its grid and the ERA5 grid,
+  with Taylor diagrams and seasonal bias maps; and the CI gate on ERA5 and two
+  CMIP6 models over the AR6 Northern Europe land region
 - `CITATION.cff`, `.zenodo.json`, a code of conduct (Contributor Covenant
   2.1), issue and pull request templates
 
@@ -168,15 +171,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code that ran a suite without data must pass `synthetic=True`, or better,
   load data. Scores from 0.1 runs on files with different grids, calendars or
   missing values are not comparable with 0.2 scores
-- Defaults to know about when comparing numbers across versions:
-  `target="coarser"` (pass `target="reference"` to regrid onto the
-  reference), cell-area weights from bounds (`weights="cos_lat"` for
-  cos(latitude)), month-length time weights, `min_coverage=0.8`,
-  `seasons="contiguous"`. When the time axis alone cannot tell an input's
-  frequency (a single time step, one month per year, irregular steps), climval
-  raises and asks for `freq=`, time bounds or a `frequency` attribute
+- Defaults that change numbers, each recorded in the provenance and each
+  with an option for the other behaviour:
+  - `target="coarser"`: the comparison grid is the one with larger cells
+    (the reference's when both are equal). `target="reference"` regrids onto
+    the reference grid
+  - `weights="area"`: cell areas computed from the target grid's latitude
+    and longitude bounds, or a given cell area field. This equals
+    cos(latitude) only on a uniform grid; `weights="cos_lat"` gives
+    cos(latitude)
+  - Time weights: monthly and yearly steps count in proportion to their
+    length in days in every sample that pools time steps
+  - `min_coverage=0.8`: an aggregated value counts only where at least 80 %
+    of its native steps are valid, per grid cell
+  - `seasons="contiguous"`: December counts in the following year's DJF and
+    incomplete seasons are left out; `seasons="calendar"` pools every
+    December, January and February
+  - Sub-daily data keep their step (`"3h"`, `"6h"`) instead of being averaged
+    to days; pass `freq="D"` for daily means
+  - `PercentileBias(method="auto")`: a histogram estimate above dask's
+    `array.chunk-size`; `method="exact"` forces the exact percentile
+  - KGE and percentile bias are computed on the Kelvin scale for
+    temperatures in degC or degF
+- When the time axis alone cannot tell an input's frequency (a single time
+  step, one month per year, irregular steps), climval raises and asks for
+  `freq=`, time bounds or a `frequency` attribute
+- Names of non-integer percentiles use `_` for the decimal point
+  (`percentile_bias_p99_9`); `percentile_bias_p99.9` is read as the same
+  metric
 - Custom metrics that raise inside `reduce` now propagate their own exception
   unchanged (on Python 3.11 and later with a note naming the metric)
+- The [migration guide](https://northflowlabs.github.io/climval/how-to/migrating/)
+  has a table of these defaults
 
 ## [0.1.1] - 2026-10-29
 

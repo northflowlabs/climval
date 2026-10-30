@@ -47,12 +47,47 @@ report = suite.run()
 result = climval.compare("era5.nc", "mpi.nc", variable=("t2m", "tas"), by="season")
 ```
 
+## Defaults that change numbers
+
+These are the choices `compare` (and `BenchmarkSuite.run()` on data files)
+makes unless told otherwise. Each one changes the values compared with a
+simpler script, and each is recorded in `result.provenance`.
+
+| Default | What it does | To get the other behaviour |
+|---|---|---|
+| `target="coarser"` | compares on the grid with larger cells, the reference's when both are equal | `target="reference"`, `"candidate"` or a grid |
+| `weights="area"` | cell areas computed from the grid's latitude and longitude bounds (or a given `areacella`); not cos(latitude) on non-uniform grids | `weights="cos_lat"` |
+| time weights | monthly and yearly steps weighted by their length in days in every sample that pools time | none; compare daily data, or weight in your own metric |
+| `min_coverage=0.8` | an aggregated value counts only where at least 80 % of the period's native steps are valid, per grid cell | `min_coverage=1.0` for complete periods, a lower value to keep more |
+| `seasons="contiguous"` | December counts in the following year's DJF; seasons missing a month are left out and listed | `seasons="calendar"` |
+| `freq=None` | the coarser native frequency; sub-daily data keep their step (`"3h"`) instead of being averaged to days | `freq="D"`, `"MS"` and so on |
+| `PercentileBias(method="auto")` | exact on samples up to dask's `array.chunk-size`, a one-pass histogram estimate above | `method="exact"` |
+| KGE and percentile bias | computed on the Kelvin scale when temperatures are in degC or degF | none |
+
+When the time axis alone cannot tell an input's frequency (a single time
+step, one month per year, irregular steps), climval raises instead of
+guessing. Pass `freq=`, add time bounds, or set a `frequency` attribute such
+as `da.assign_attrs(frequency="mon")`.
+
 ## Smaller changes
 
 - Dimensionless metrics report units `"1"` instead of `"dimensionless"`.
 - `DEFAULT_METRICS` adds `crmse`, `std_ratio` and `kge`; `spearman_r` is
   available by name.
-- xarray, pandas, cftime and PyYAML are core dependencies.
+- Names of non-integer percentiles use `_` for the decimal point:
+  `percentile_bias_p99_9`. Metrics can be named by aliases such as `bias`
+  and `pearson` in `metrics=` and in thresholds.
+- `BaseMetric.compute`, the 0.1 NumPy interface, normalises weights over the
+  valid points, drops non-finite points and raises `ValueError` for negative
+  weights. The weighted MAE of 0.1 omitted the absolute value; it is now the
+  weighted mean of absolute differences.
+- An exception raised inside a metric reaches the caller unchanged, as its
+  own type.
+- `load_model` defaults `lat_range`, `lon_range`, `time_start` and
+  `time_end` to `None`; when they are set, `BenchmarkSuite.run()` applies
+  them as region and period.
+- xarray, pandas, dask, cftime and PyYAML are core dependencies (and tomli
+  on Python 3.10).
 - Timestamps in results are timezone aware (UTC).
 
 The [changelog](../changelog.md) lists every change.

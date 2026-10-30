@@ -30,8 +30,11 @@ sizes before anything is read.
 ## Paths and URLs
 
 `compare` also accepts paths and URLs. NetCDF and Zarr open lazily, local or
-remote through fsspec (`gs://`, `s3://`, `https://`). Storage options go in
-`open_kwargs`:
+remote through fsspec (`gs://`, `s3://`, `https://`). A Zarr store is
+recognised by a `.zarr` suffix or, without one, by its metadata (`.zmetadata`,
+`.zgroup` or `zarr.json`), so a Pangeo CMIP6 store URL, which ends in a
+version directory, works as given; `open_kwargs={"engine": "zarr"}` forces
+Zarr. Storage options go in `open_kwargs`:
 
 ```python
 result = climval.compare(
@@ -75,7 +78,9 @@ reading.
 
 ## Sub-daily data
 
-Hourly or 6-hourly data are aggregated to the common frequency with a time
-mean before matching (see [Calendars and frequencies](calendars.md)). For
-long periods it is often cheaper to compute daily or monthly means once,
-store them, and compare those.
+Sub-daily data keep their step: two 6-hourly inputs are compared every 6
+hours, and hourly against 6-hourly data in 6-hour bins. A coarser `freq`
+(`"D"`, `"MS"`) averages them first, with the `min_coverage` rule (see
+[Calendars and frequencies](calendars.md)). For long periods it is often
+cheaper to compute daily or monthly means once, store them, and compare
+those.

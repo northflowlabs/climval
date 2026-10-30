@@ -82,15 +82,17 @@ result = climval.compare(
     region=climval.Box(lat=(35, 72), lon=(-10, 40)),
     period=("2014", "2014"),              # 6-hourly ERA5 is averaged to monthly means
     by="season",
-    target="reference",                   # compare on the ERA5 grid
 )
 ```
 
-`target` chooses the comparison grid: `"reference"`, `"candidate"`,
-`"coarser"` or a grid of your own. The same call is available as an accessor:
+Both datasets are compared on the coarser of the two grids by default
+(`target="coarser"`), here the 1.875 degree MPI-ESM1-2-LR grid, so a model is
+not interpolated onto a finer grid than it has. Pass `target="reference"`,
+`target="candidate"` or a grid of your own to compare elsewhere; the grid
+used is recorded. The same call is available as an accessor:
 `cmip.climval.compare(era5, variable=("2m_temperature", "tas"))`. The
 [examples](https://github.com/northflowlabs/climval/tree/main/examples) score
-five CMIP6 models against ERA5 in one call and run the CI gate on real data.
+five CMIP6 models against ERA5 and run the CI gate on real data.
 
 ### How alignment works
 
@@ -123,7 +125,7 @@ Extra dimensions such as an ensemble `member` are kept, so one call scores every
 
 ## Installation
 
-**Core (NumPy, SciPy, pandas, xarray, cftime, dask):**
+**Core (NumPy, SciPy, pandas, xarray, dask, cftime, PyYAML):**
 ```bash
 pip install climval
 ```

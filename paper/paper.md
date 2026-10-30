@@ -77,8 +77,10 @@ an existing tool because the missing piece was a light, typed step that works
 directly on lazy xarray objects from cloud storage, installs with pip, and
 answers with an exit code in a CI job. Adding these properties to a campaign
 tool would change its design; adding alignment to a metric library would
-widen its scope beyond verification. climval's weighted metrics agree with
-xskillscore to 1e-10 in its test suite, so users can move between the two.
+widen its scope beyond verification. For the metrics both libraries define
+(RMSE, MAE, mean error, Pearson and Spearman correlation), climval's test
+suite checks agreement with xskillscore to a relative tolerance of 1e-10, so
+users can move between the two.
 
 # Software design
 
@@ -88,22 +90,31 @@ longitude convention, region selection (including boxes across the
 antimeridian and IPCC AR6 regions [@iturbide2020] through regionmask
 [@regionmask]), time alignment, regridding (bilinear or nearest with xarray,
 conservative through xESMF [@xesmf]), unit conversion, a paired
-missing-value mask and area weights. Time is aligned by calendar labels, not
-by timestamps: the finer input is aggregated to the common frequency and
-periods are matched by year and month, which makes `noleap`, `360_day` and
-Gregorian calendars comparable at monthly resolution. Each step appends a
-record, so the alignment can be read back.
+missing-value mask and cell-area weights computed from the grid's cell
+bounds. By default the comparison grid is the coarser of the two, so neither
+input is interpolated to a finer grid than it has. Time is aligned by
+calendar labels, not by timestamps: each input's native frequency is read
+from its time bounds, a `frequency` attribute or its time steps (climval
+raises when these cannot tell it), the finer input is aggregated to the
+common frequency, a period counts only where enough of its native steps are
+valid, and periods are matched by year and month, which makes `noleap`,
+`360_day` and Gregorian calendars comparable at monthly resolution. Each
+step appends a record, so the alignment can be read back.
 
 `climval.compare` evaluates metrics on the aligned pair over named samples:
 all points in space and time, the spatial pattern of the time-mean fields
 (the statistic behind the Taylor diagram [@taylor2001]), the pattern at each
 time step, and the time series at each grid point, optionally grouped by
-season, month or year. The metrics include mean bias, mean absolute error,
+season, month or year. Monthly time steps are weighted by their length in
+days, and seasons are contiguous by default: a December belongs to the
+following winter, and incomplete winters at the ends of the period are left
+out. The metrics include mean bias, mean absolute error,
 root mean square error and its centred form, pattern correlation, the
 standard deviation ratio and the skill score of @taylor2001, the Kling-Gupta
 efficiency [@gupta2009] and percentile biases. Every metric is written as a weighted xarray
 reduction, so dask arrays stay lazy until one compute pass evaluates all
-metrics and samples together. Extra dimensions such as an ensemble member or
+metrics and samples together; percentiles of samples larger than one dask
+chunk are estimated in the same pass from weighted histograms. Extra dimensions such as an ensemble member or
 a model index are kept, so one call scores a whole ensemble. The result
 carries a provenance record with software versions, input identity
 (including CMIP attributes such as `source_id` and `tracking_id`), every
@@ -120,10 +131,14 @@ cannot be used. A composite GitHub Action in the repository installs climval,
 runs the gate, writes the job summary and uploads the report.
 
 The main trade-offs are scope and defaults. climval compares two datasets at
-a time; multi-model studies stack aligned candidates along a dimension.
-Alignment choices that change results, such as the target grid and the
-regridding method, are explicit options and recorded, rather than hidden
-heuristics. The library never substitutes synthetic data for missing inputs.
+a time; multi-model studies run one comparison per model, or align the
+models onto one grid and stack them along a dimension. Alignment choices
+that change results, such as the target grid, the regridding method, the
+coverage threshold and the season definition, are explicit options with
+documented defaults, and the values used are recorded. When the data cannot
+decide a choice, such as the frequency of a single time step, climval raises
+instead of guessing. The library never substitutes synthetic data for
+missing inputs.
 
 # Example
 
@@ -137,7 +152,6 @@ result = climval.compare(
     region=climval.Box(lat=(35, 72), lon=(-10, 40)),
     period=("1995", "2014"),
     by="season",
-    target="reference",
 )
 result.to_dataframe()           # sample, group, metric, value, units
 result.check({"pearson_r": {"min": 0.95, "sample": "climatology"}}).passed
@@ -146,9 +160,9 @@ result.check({"pearson_r": {"min": 0.95, "sample": "climatology"}}).passed
 The documentation includes two notebooks that run on public cloud data
 without credentials: ERA5 from the analysis-ready ARCO-ERA5 store
 [@carver2023] against five CMIP6 historical simulations from the Pangeo CMIP6
-collection over Europe, scored in one call with a Taylor diagram per season,
-and the CI gate applied to two of these models over the AR6 Northern Europe
-land region.
+collection over Europe, each compared on its own grid, the coarser one, with
+a Taylor diagram per season, and the CI gate applied to two of these models
+over the AR6 Northern Europe land region.
 
 # Research impact statement
 

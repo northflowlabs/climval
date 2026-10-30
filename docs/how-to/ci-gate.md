@@ -24,7 +24,11 @@ Each limit takes `min`, `max` and `abs_max` (any combination), and optionally
 With an extra dimension such as `member` or `model`, every member is checked
 and must pass. A NaN value fails, because it cannot show that the limit holds.
 A threshold that matches no value (a metric that was not computed, a group
-that does not exist) raises an error rather than passing silently.
+that does not exist) raises an error rather than passing silently. Metrics
+may be named by their aliases (`bias` for `mean_bias`, `pearson` for
+`pearson_r`, `tss`, `centred_rmse`; see [Metrics](../concepts/metrics.md)),
+and a percentile bias by its percentile, `percentile_bias_p99_9` for the
+99.9th.
 
 ## A configuration file
 
@@ -37,8 +41,8 @@ version: 1
 
 defaults:                      # merged into every check; a check overrides them
   period: ["1995", "2014"]
-  by: season
-  target: reference
+  by: season                   # contiguous seasons: December counts in the next DJF
+  min_coverage: 0.8            # the default, written out
 
 checks:
   - name: europe-tas
@@ -83,14 +87,16 @@ checks:
 | `variables` | a list of those: one comparison per variable, same thresholds |
 | `region` | `{lat: [S, N], lon: [W, E], name: ...}`, `[S, N]`, `[S, N, W, E]` or a regionmask name such as `"ar6.land:NEU"` |
 | `period` | `[start, end]`, for example `["1995", "2014"]` |
-| `freq` | `h`, `D`, `MS` or `YS` |
+| `freq` | `h` or `<N>h` for a whole number of hours that divides 24 (`3h`, `6h`), `D`, `MS` or `YS`; default the coarser native frequency |
+| `min_coverage` | fraction in (0, 1] of a period's native steps that must be valid, per grid cell, when aggregating (default `0.8`) |
 | `by` | `season`, `month` or `year` |
+| `seasons` | `contiguous` (default: December counts in the following DJF, incomplete seasons are left out) or `calendar` (every December, January and February form DJF) |
 | `regrid` | `bilinear`, `nearest` or `conservative` |
-| `target` | `reference`, `candidate` or `coarser` |
+| `target` | `coarser` (default), `reference` or `candidate` |
 | `time` | `intersect` or `exact` |
 | `units` | `convert`, `strict`, `ignore` or `{reference: UNITS, candidate: UNITS}` |
-| `weights` | `area`, `cos_lat` or `none` |
-| `metrics` | list of metric names (default: all default metrics) |
+| `weights` | `area` (default: cell area from the grid's bounds), `cos_lat` or `none` |
+| `metrics` | list of metric names or aliases (default: all default metrics) |
 | `samples` | list of samples (default `[space_time, climatology]`) |
 | `names` | `[reference name, candidate name]` for the reports |
 | `open_kwargs` | passed to the xarray opener for both inputs |

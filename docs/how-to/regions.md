@@ -19,8 +19,8 @@ band = climval.Box(lat=(60, 90))                         # all longitudes
 A dict works too: `region={"lat": (35, 72), "lon": (-10, 40)}`.
 
 The box is cut before regridding: the target grid exactly, the grid that is
-regridded with a margin of one cell (and wrapped columns when it is global)
-so the points at the edge have neighbours. The step records how many points
+regridded with a margin of one cell (and, for bilinear and nearest, wrapped
+columns when it is global) so the points at the edge have neighbours. The step records how many points
 each side kept.
 
 ## regionmask regions

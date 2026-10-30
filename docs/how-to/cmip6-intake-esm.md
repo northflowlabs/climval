@@ -41,11 +41,17 @@ intake-esm adds `member_id` (and `dcpp_init_year`) as dimensions. Squeeze
 them for one member, or keep `member_id` to score every member in one call:
 it is an extra dimension and climval keeps it.
 
-## Several models in one call
+Each model is compared on the coarser of its grid and the reference grid
+(`target="coarser"`), so no model is interpolated to a finer grid than it
+has. Different models then end up on different grids; the
+[Europe example](../examples/era5_cmip6_europe.ipynb) scores five models
+this way and joins their tables.
 
-Models come on different grids and calendars, so they cannot be stacked
-directly. Align each one with the reference first, then stack the aligned
-candidates:
+## Several models on one common grid
+
+When the models should be compared on the same points, for example to stack
+them, align each one onto one grid first and then stack the aligned
+candidates. Here the common grid is the reference's:
 
 ```python
 import pandas as pd
@@ -59,8 +65,8 @@ stack = xr.concat(list(aligned.values()), dim=pd.Index(list(aligned), name="mode
 result = climval.compare(pair.reference, stack, by="season")
 ```
 
-The [Europe example](../examples/era5_cmip6_europe.ipynb) runs this for five
-models.
+`target` may also be an xarray object that holds a grid, for example a
+common grid coarser than every model.
 
 ## In a configuration file
 

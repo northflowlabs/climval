@@ -34,8 +34,11 @@ The `units` step records what was converted, for example
 `crmse` are in the reference's units, ratios and correlations in `1`,
 percentile bias in `%`.
 
-## Temperature in K for relative metrics
+## Temperature on an absolute scale for relative metrics
 
 `kge` and `percentile_bias_pN` divide by a reference value, so they depend on
-where zero is. Keep temperature in K for these metrics; the reference's units
-decide.
+where zero is. When the reference is in degC or degF, `compare` computes these
+two metrics with both inputs shifted to the Kelvin scale, so their values do
+not depend on the temperature unit. The shift is recorded in
+`result.provenance["metric_notes"]["absolute_scale"]`. Other metrics keep the
+reference's units.

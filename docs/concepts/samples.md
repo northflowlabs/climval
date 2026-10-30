@@ -6,15 +6,17 @@ point sets *samples* and computes each requested sample for every group.
 ## Samples
 
 Let \(r\) and \(c\) be the aligned reference and candidate, \(w_s\) the
-spatial weight of grid cell \(s\) and \(t\) a time step. Points where either
-input is missing carry zero weight.
+spatial weight of grid cell \(s\) (its area by default), \(t\) a time step
+and \(L_t\) its time weight: the length of its period in days, in the
+reference's calendar, for monthly and yearly data, and 1 for daily and
+sub-daily data. Points where either input is missing carry zero weight.
 
 | Sample | Points pooled | Weights | Result |
 |---|---|---|---|
-| `space_time` | every valid point \((s, t)\) of the group | \(w_s\) | one value per group |
-| `climatology` | the time-mean fields \(\bar r_s, \bar c_s\) of the group, compared over \(s\) | \(w_s\) | one value per group |
+| `space_time` | every valid point \((s, t)\) of the group | \(w_s L_t\) | one value per group |
+| `climatology` | the time-mean fields \(\bar r_s, \bar c_s\) of the group (means weighted by \(L_t\)), compared over \(s\) | \(w_s\) | one value per group |
 | `space` | the cells \(s\) at each time step | \(w_s\) | a time series |
-| `time` | the time steps \(t\) at each cell | equal | a map per group |
+| `time` | the time steps \(t\) at each cell | \(L_t\) | a map per group |
 
 The default is `samples=("space_time", "climatology")`.
 
@@ -39,8 +41,17 @@ for example a map of mean bias or of temporal correlation.
 Dec and `by="year"` adds one group per year. The group `all` holds the whole
 period and is always present. A group selects time steps by their calendar
 month or year; the `climatology` of group JJA is the mean of the June, July
-and August fields of the period, and DJF holds the December, January and
-February fields.
+and August fields of the period.
+
+Seasons are contiguous by default (`seasons="contiguous"`): a December
+belongs to the DJF of the following year, and a season counts only when all
+three of its months are present. For the period 1995 to 2014 that leaves out
+January and February 1995 (their December is outside the period) and
+December 2014 (its January and February are), so DJF holds 19 winters. The
+seasons left out are listed in `result.provenance["metric_notes"]["seasons"]`,
+here `DJF 1995` and `DJF 2015`. The group `all` keeps every month.
+`seasons="calendar"` instead pools every December, January and February of
+the period into DJF, as xarray's `time.season` grouping does.
 
 ## Extra dimensions
 

@@ -48,6 +48,8 @@ comparison of two datasets carefully and says exactly what it did.
   [the GitHub Action](how-to/github-action.md).
 - [ERA5 against CMIP6 over Europe](examples/era5_cmip6_europe.ipynb): five
   CMIP6 models against ERA5, read anonymously from public cloud storage.
+- [Migrating from 0.1](how-to/migrating.md): what changed, including the
+  defaults that change numbers.
 
 climval is open source under the Apache License 2.0 and maintained by
 [Northflow Technologies AS](https://northflow.no).
