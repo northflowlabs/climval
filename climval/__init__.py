@@ -4,8 +4,9 @@ climval: validate climate model output against reference data
 
 climval aligns a candidate with a reference (grid, longitude convention,
 region, calendar, frequency, units, missing values, area weights) and then
-computes weighted metrics with xarray, lazily on dask arrays. Every result
-carries a provenance record of what was compared and how.
+computes weighted metrics with xarray, lazily on dask arrays and in one dask
+computation. Every result carries a provenance record of what was compared
+and how.
 
 Quickstart
 ----------

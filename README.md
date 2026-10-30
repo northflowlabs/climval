@@ -12,15 +12,15 @@ climval is a Python library that validates climate model output against referenc
 
 ## Why climval
 
-Every lab compares climate models with its own scripts for RMSE, bias and Taylor diagrams, and the results rarely reproduce across groups. Most of the work, and most of the mistakes, sit before the metric: grids that differ, longitudes in 0..360 against -180..180, a `360_day` model calendar against a standard-calendar reanalysis, K against degC, missing values in one dataset and not the other. climval does those steps explicitly, in one call, and writes each one into the result. It takes the data you already have open in Python (xarray, dask, Zarr in cloud storage, intake-esm catalogues) and never loads a whole dataset into memory.
+Every lab compares climate models with its own scripts for RMSE, bias and Taylor diagrams, and the results rarely reproduce across groups. Most of the work, and most of the mistakes, sit before the metric: grids that differ, longitudes in 0..360 against -180..180, a `360_day` model calendar against a standard-calendar reanalysis, K against degC, missing values in one dataset and not the other. climval does those steps explicitly, in one call, and writes each one into the result. It takes the data you already have open in Python (xarray, dask, Zarr in cloud storage, intake-esm catalogues). NetCDF and Zarr inputs are read chunk by chunk with dask, and all metrics come out of one dask computation.
 
 ## Features
 
-- **Inputs:** `xarray.DataArray`, `xarray.Dataset`, or a path or URL to NetCDF, Zarr or CSV, local or remote through fsspec (`gs://`, `s3://`, `https://`). Files open lazily with dask chunks
-- **Alignment:** CF-aware coordinate detection, longitude convention, latitude order, regions (boxes across the antimeridian, regionmask regions such as IPCC AR6), regridding (bilinear, nearest, conservative through xESMF), calendars and frequencies, unit conversion, paired missing-value masking and area weights. Each step is recorded
+- **Inputs:** `xarray.DataArray`, `xarray.Dataset`, or a path or URL to NetCDF, Zarr or CSV, local or remote through fsspec (`gs://`, `s3://`, `https://`). NetCDF and Zarr open with dask chunks; Zarr stores are recognised by a `.zarr` suffix (also `.zarr-v3`) or by their metadata, so Pangeo CMIP6 store URLs work as given. CSV tables are read into memory; station tables become a `station` dimension
+- **Alignment:** CF-aware coordinate detection, longitude convention, latitude order, regions (boxes across the antimeridian, regionmask regions such as IPCC AR6), regridding (bilinear, nearest, first-order conservative through xESMF), station sampling, calendars and frequencies (with time bounds when present), unit conversion, paired missing-value masking and cell-area weights. Each step is recorded
 - **Metrics:** mean bias, MAE, RMSE, centred RMSE, normalised RMSE, Pearson r, Spearman r, standard deviation ratio, Taylor skill score, Kling-Gupta efficiency and percentile bias, all weighted
-- **Samples and groups:** the full space-time sample, the spatial pattern of the climatology, per-time-step patterns and per-grid-point maps; per season, month or year
-- **Dask:** inputs stay lazy until compute; one pass computes every metric
+- **Samples and groups:** the full space-time sample, the spatial pattern of the climatology, per-time-step patterns and per-grid-point maps; per season (contiguous DJF), month or year
+- **Dask:** inputs stay lazy until compute, and one `dask.compute` call computes every metric and sample, so each input chunk is read once. Memory per task stays near the chunk size for every metric except Spearman r and NumPy-only custom metrics (see [Memory](#memory))
 - **Provenance:** software versions, input identity (path or URL, coordinate and value hashes, CMIP attributes such as `source_id`, `experiment_id`, `member_id`, `tracking_id`), every alignment step and a timestamp, as JSON
 - **Thresholds:** pass or fail limits on any value, for CI gates
 - **Export:** HTML report, JSON and Markdown; tables in Jupyter
@@ -52,7 +52,7 @@ result.check({"rmse": {"max": 2.0}, "pearson_r": {"min": 0.9, "sample": "climato
 result.export("report.html")      # or .json, .md
 ```
 
-The candidate is regridded onto the reference grid by default. Pass `target="candidate"`, `target="coarser"` or a grid of your own to compare elsewhere. The same call is available as an accessor: `cmip.climval.compare(era5, variable=("t2m", "tas"))`.
+Both datasets are compared on the coarser of the two grids by default (`target="coarser"`, common practice in PMP and ESMValTool), so a coarse model is not interpolated onto a fine reanalysis. Pass `target="reference"`, `target="candidate"` or a grid of your own to compare elsewhere. The grid chosen is recorded. The same call is available as an accessor: `cmip.climval.compare(era5, variable=("t2m", "tas"))`.
 
 To try climval without data, `climval.demo()` compares two synthetic fields on different grids, calendars and units. Its results are flagged as synthetic in every output.
 
@@ -60,39 +60,46 @@ To try climval without data, `climval.demo()` compares two synthetic fields on d
 
 | Step | What climval does |
 |---|---|
-| Coordinates | Finds latitude, longitude and time through cf_xarray when installed, else CF attributes and common names; renames them to `lat`, `lon`, `time`; sorts latitude ascending. Two-dimensional latitude and longitude (curvilinear grids) are accepted only with `regrid="conservative"`, which uses xESMF |
+| Coordinates | Finds latitude, longitude and time through cf_xarray when installed, else CF attributes and common names; renames them to `lat`, `lon`, `time`; sorts latitude ascending. Two-dimensional latitude and longitude (curvilinear grids) are accepted only with `regrid="conservative"`, which uses xESMF. Latitude and longitude on a shared dimension are station data |
 | Longitude | Expresses both inputs in one frame: the target grid's convention, or a frame that keeps the requested region in one piece |
-| Region | Cuts the box before regridding. The grid being regridded keeps a margin of one cell, and a wrapped column at each end when it is global, so the edges interpolate without extrapolation. A regionmask polygon is applied after regridding, on the target grid |
-| Time | Selects the period on calendar fields, aggregates the finer input to the coarser frequency (or to `freq=`) with a time mean, drops incomplete periods, and matches periods by label (year and month for monthly data), not by timestamp. This makes `noleap`, `360_day`, `all_leap`, `julian` and standard calendars comparable. With no common period it raises |
-| Regrid | `bilinear` and `nearest` use `xarray.interp`; `conservative` uses xESMF. Target points outside the source grid, or inside a hole in it, become NaN |
-| Units | Converts the candidate into the reference's units: K, degC and degF; kg m-2 s-1 and mm/day; Pa and hPa; fractions and percent, built in. pint handles other units when installed. Unknown mismatches raise unless you pass `units="ignore"` or declare the units |
+| Region | Cuts the box before regridding. The grid being regridded keeps a margin of one cell; for bilinear and nearest on a global grid it also gets a wrapped column at each end. Conservative remapping gets no wrapped columns and tells xESMF the source is periodic instead. A regionmask polygon is applied after regridding, on the target grid |
+| Time | Finds each input's native frequency from time bounds (`time_bnds`), else a `frequency` attribute (CMIP `mon`, `day`, `3hr` and so on), else the time steps. With bounds, each step is labelled by the midpoint of its interval, so values stamped at the end of their interval (ERA5 accumulations at 00 UTC) count for the right day. Selects the period on calendar fields, aggregates the finer input to the coarser frequency (or to `freq=`) with a time mean, and matches periods by label (year and month for monthly data), not by timestamp. Sub-daily data keep their step: hourly against 3-hourly is compared in 3-hour bins. An aggregated value counts only where at least `min_coverage` (default 0.8) of its native steps are valid, per grid cell. This makes `noleap`, `360_day`, `all_leap`, `julian` and standard calendars comparable. When the time axis alone cannot tell the frequency (a single time step, one month per year, irregular steps) and the answer changes the result, it raises and asks for `freq=`, time bounds or a `frequency` attribute. With no common period it raises |
+| Regrid | `bilinear` and `nearest` use `xarray.interp`; `conservative` uses xESMF and is the method that averages a fine grid over coarse cells (bilinear onto a coarser grid samples points, and the provenance says so). Target points within half a source cell beyond the outermost source centre take the edge value, so polar rows are kept; points farther out, or inside a hole in the source grid, become NaN |
+| Stations | When one input is station data (a CSV with latitude and longitude columns that do not form a full grid, or any DataArray with `lat` and `lon` on a `station` dimension), the other is sampled at the stations (bilinear or nearest) and weights are uniform |
+| Units | Converts the candidate into the reference's units: K, degC and degF; kg m-2 s-1 and mm/day; Pa and hPa; fractions and percent, built in. pint handles other units when installed. Unit symbols are matched with their case ("MB" is not "mb"). Unknown mismatches raise unless you pass `units="ignore"` or declare the units |
 | Missing values | A point counts only where both inputs are valid |
-| Weights | Cell area (`area=` or the reference's `cell_measures`), else cos(latitude), in every spatial mean |
+| Weights | Cell area in every spatial mean: `area=`, or the field named by the reference's `cell_measures`, else computed from the target grid's latitude and longitude bounds (`lat_bnds`, `lon_bnds`, or midpoints between centres). This equals cos(latitude) on a uniform grid and is correct on Gaussian and other non-uniform grids. `weights="cos_lat"` asks for cos(latitude) |
 
 ### What each number is computed over
 
 | Sample | Points | Result |
 |---|---|---|
-| `space_time` (default) | every valid point in space and time, spatially weighted | one value per group |
-| `climatology` (default) | the time-mean fields of the group, compared over space, spatially weighted | one value per group |
+| `space_time` (default) | every valid point in space and time, weighted by cell area and period length | one value per group |
+| `climatology` (default) | the time-mean fields of the group (means weighted by period length), compared over space, weighted by cell area | one value per group |
 | `space` | the spatial pattern at each time step | a time series |
-| `time` | the time series at each grid point, equal weight per step | a map per group |
+| `time` | the time series at each grid point, weighted by period length | a map per group |
+
+For monthly and yearly comparisons each time step counts in proportion to its length in days, in the reference's calendar, the same weighting used to aggregate months into years. Daily and sub-daily steps count equally.
+
+Groups: `by="season"` uses contiguous seasons by default: a December belongs to the following year's DJF, and seasons missing one of their months (the partial winters at the start and end of a period) are left out and listed in the provenance. `seasons="calendar"` pools every December, January and February instead.
 
 Extra dimensions such as an ensemble `member` are kept, so one call scores every member.
 
 ## Installation
 
-**Core (NumPy, SciPy, pandas, xarray, cftime):**
+**Core (NumPy, SciPy, pandas, xarray, cftime, dask):**
 ```bash
 pip install climval
 ```
 
-**Cloud data and dask (Zarr, fsspec, gcsfs, s3fs):**
+**Cloud data (Zarr, fsspec, gcsfs, s3fs):**
 ```bash
 pip install "climval[cloud]"
 ```
 
-**Other extras:** `netcdf` (netCDF4, h5netcdf), `units` (pint, cf_xarray), `regions` (regionmask), `viz` (matplotlib, cartopy), `all` (everything above). Conservative regridding needs xESMF, which depends on the ESMF library and is best installed with conda: `conda install -c conda-forge xesmf`.
+**Other extras:** `netcdf` (netCDF4, h5netcdf), `units` (pint, cf_xarray), `regions` (regionmask), `viz` (matplotlib, cartopy), `all` (everything above). `cftime` is kept as an extra that installs nothing new, because cftime is a core dependency. Conservative regridding needs xESMF, which depends on the ESMF library and is best installed with conda: `conda install -c conda-forge xesmf`.
+
+The lower bounds in `pyproject.toml` are tested in CI: one job installs every core dependency at exactly its lower bound on Python 3.10.
 
 **Development:**
 ```bash
@@ -108,10 +115,13 @@ pytest
 # Align and compare two datasets
 climval compare era5.zarr tas_mpi.nc \
   --variable t2m,tas \
-  --region 35,72,-10,40 \
+  --lat 35,72 --lon -10,40 \
   --period 1995 2014 \
   --by season \
   --output results/report.html
+
+# Southern regions: negative edges work with --lat and --lon
+# (--lat -60,-30 or --lat -60 -30), or write --region=-60,-30,-10,40
 
 # Compare two synthetic example fields
 climval demo
@@ -141,10 +151,20 @@ Differences are candidate minus reference. Means, variances and covariances are 
 | Spearman correlation | `spearman_r` | ↑ higher better | weighted Pearson correlation of unweighted ranks (by name, not computed by default) |
 | Standard deviation ratio | `std_ratio` | best at 1 | candidate over reference |
 | Taylor skill score | `taylor_skill_score` | ↑ higher better | Taylor (2001) eq. 5 with R0 = 1 |
-| Kling-Gupta efficiency | `kge` | ↑ higher better | Gupta et al. (2009); for ratio-scale variables such as precipitation |
-| Percentile bias (P95, P5) | `percentile_bias_p95` | ↓ lower better (in size) | 100 (Q_c - Q_r) / abs(Q_r) of weighted percentiles (Gleckler et al. 2008); use K, not degC |
+| Kling-Gupta efficiency | `kge` | ↑ higher better | Gupta et al. (2009), eq. 9 |
+| Percentile bias (P95, P5) | `percentile_bias_p95` | ↓ lower better (in size) | 100 (Q_c - Q_r) / abs(Q_r) of weighted percentiles; any percentile by name, for example `percentile_bias_p99_9` |
 
-The weighted metrics agree with xskillscore to 1e-10 in the test suite, with and without weights and missing values.
+KGE and percentile bias divide by a reference value, so they depend on where the unit scale has its zero. `climval.compare` computes both on an absolute scale: temperatures in degC or degF are shifted to K for these two metrics (recorded in the provenance), so the result is the same whatever the temperature unit.
+
+How the metrics are tested: `rmse`, `mae`, `mean_bias`, `pearson_r` and `spearman_r` are compared with xskillscore's `rmse`, `mae`, `me`, `pearson_r` and `spearman_r` at a relative tolerance of 1e-10, over three sets of dimensions, with and without weights and with and without missing values (Spearman with missing values against SciPy, because xskillscore returns NaN there). `crmse`, `nrmse`, `std_ratio`, `taylor_skill_score` and `kge`, which xskillscore does not have, are compared with independent NumPy definitions at 1e-9 with random weights; percentile bias with `numpy.percentile` at 1e-9, and weighted percentiles with integer weights against repeated values.
+
+### Memory
+
+Every metric is a chunk-wise dask reduction except these:
+
+- Percentile bias needs the whole sample. A sample that fits in dask's `array.chunk-size` (128 MiB, 16.8 million float64 values) is gathered into one chunk and computed exactly. A larger one, such as the space-time sample of a year of hourly 0.25 degree data, is estimated in the same single pass from weighted histograms whose bins are 2**-20 (about 1e-6) of the value wide, so memory depends on the number of distinct bins, not on the sample size. The error is at most one bin width plus the difference between the weighted empirical distribution and NumPy's linear interpolation, which is below one gap between neighbouring sorted values. `PercentileBias(95, method="exact")` forces the exact computation; the provenance records which method each sample used (`metric_methods`).
+- Spearman r ranks the whole sample and so gathers it into one chunk; for the space-time sample of large data that is the whole dataset. climval warns when a sample exceeds `array.chunk-size`. Spearman r is not computed by default.
+- Custom metrics that implement only the NumPy `compute` also get each sample in one chunk.
 
 ### Custom metrics
 
@@ -194,7 +214,7 @@ report = suite.run(region=climval.Box(lat=(35, 72), lon=(-10, 40)))
 report.export("results/report.html")
 ```
 
-`run()` uses `climval.compare` for each candidate and variable. Without data it raises; `run(synthetic=True)` scores random arrays for pipeline checks only and flags them.
+`run()` uses `climval.compare` for each candidate and variable. Domains given to `load_model` (`lat_range`, `lon_range`, `time_start`, `time_end`) are applied as the region and period of the comparison (the overlap of both models' domains), unless `run()` gets `region=` or `period=`; a model without them uses all its data. Without data `run()` raises; `run(synthetic=True)` scores random arrays for pipeline checks only and flags them.
 
 ## Standard Variables
 
@@ -224,13 +244,13 @@ climval/
 ├── api.py              # compare(), demo(), demo_data()
 ├── result.py           # Comparison: values, tables, export, check
 ├── align/
-│   ├── inputs.py       # DataArray, Dataset, path or URL, opened lazily
+│   ├── inputs.py       # DataArray, Dataset, path or URL; bounds, frequency, stations
 │   ├── coords.py       # CF coordinate detection, longitude and latitude order
 │   ├── region.py       # Box (antimeridian aware), regionmask regions
 │   ├── temporal.py     # periods, calendars, frequencies, aggregation
-│   ├── regrid.py       # bilinear, nearest, conservative (xESMF)
+│   ├── regrid.py       # bilinear, nearest, conservative (xESMF), station sampling
 │   ├── units.py        # unit table, pint fallback
-│   └── weights.py      # cell area, cos(latitude)
+│   └── weights.py      # cell area from bounds, given areas, cos(latitude)
 ├── metrics/
 │   ├── stats.py        # weighted metrics, BaseMetric, registry
 │   └── engine.py       # samples and groups
@@ -258,7 +278,7 @@ It is configured through YAML recipes and installed through conda, which suits a
 
 ### xskillscore
 
-[xskillscore](https://github.com/xarray-contrib/xskillscore) provides deterministic and probabilistic verification metrics on xarray objects. It expects inputs that are already aligned; climval does the alignment and uses the same metric definitions, which the test suite checks against xskillscore.
+[xskillscore](https://github.com/xarray-contrib/xskillscore) provides deterministic and probabilistic verification metrics on xarray objects. It expects inputs that are already aligned; climval does the alignment, and for the metrics both libraries have (RMSE, MAE, mean error, Pearson r, Spearman r) uses the same definitions, which the test suite checks against xskillscore.
 
 ### ClimateLearn
 
