@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in climval does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for the report. A short example that shows the problem helps most.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Minimal example
+      description: >-
+        A short script. climval.demo_data() gives two small synthetic fields
+        when your own data cannot be shared.
+      render: python
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message or output
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: climval version
+      description: python -c "import climval; print(climval.__version__)"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Python, xarray and dask versions, operating system; how climval was installed.

@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use climval, please cite it as below."
+type: software
+title: "climval: validation of climate model output against reference data"
+abstract: >-
+  climval is a Python library that validates climate model output against
+  reference data. It aligns the two datasets in space, time and units
+  (coordinates, longitude convention, regions, calendars, frequencies,
+  regridding, unit conversion, paired missing values and area weights),
+  computes weighted metrics with xarray, lazily on dask arrays, records the
+  provenance of every value, and gates continuous integration on thresholds
+  with the climval check command and a GitHub Action.
+authors:
+  - given-names: "Tom Danny S."
+    family-names: Pedersen
+    email: tdp@northflow.no
+    affiliation: Northflow Technologies AS
+  - name: Northflow Technologies AS
+    country: "NO"
+    website: "https://northflow.no"
+    email: hello@northflow.no
+version: 0.2.0
+license: Apache-2.0
+repository-code: "https://github.com/northflowlabs/climval"
+url: "https://northflowlabs.github.io/climval/"
+keywords:
+  - climate
+  - model evaluation
+  - validation
+  - CMIP6
+  - ERA5
+  - xarray
+  - dask
+  - Pangeo
+  - continuous integration

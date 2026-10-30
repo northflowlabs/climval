@@ -40,6 +40,7 @@ results/
 *.html
 *.json
 !examples/*.json
+!.zenodo.json
 
 # IDEs
 .vscode/
