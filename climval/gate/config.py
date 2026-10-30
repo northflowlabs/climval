@@ -107,7 +107,8 @@ class InputSpec:
             text = self.given or self.path
         else:
             q = ", ".join(f"{k}={v}" for k, v in self.query.items())
-            text = f"{self.given or self.catalog} [{q}]"
+            catalog = str(self.given or self.catalog)
+            text = f"{catalog.rstrip('/').rsplit('/', 1)[-1]} [{q}]"
         if self.sel:
             text += " sel(" + ", ".join(f"{k}={v}" for k, v in self.sel.items()) + ")"
         return text

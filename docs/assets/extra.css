@@ -1,0 +1,13 @@
+:root {
+  --md-primary-fg-color: #0e6b63;
+  --md-primary-fg-color--light: #3fb9a8;
+  --md-primary-fg-color--dark: #0a4f49;
+  --md-accent-fg-color: #0e6b63;
+}
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #0e6b63;
+  --md-accent-fg-color: #3fb9a8;
+  --md-typeset-a-color: #3fb9a8;
+}
+.md-typeset table:not([class]) { font-size: 0.72rem; }
+.md-header__button.md-logo img { height: 1.6rem; }

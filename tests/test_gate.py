@@ -293,7 +293,7 @@ def test_outputs(gate_dir: Path, tmp_path: Path) -> None:
     html = report.to_html()
     assert "<!DOCTYPE html>" in html and "europe-strict" in html and "class='fail'" in html
     for text in (md, html, report.summary_text()):
-        assert "—" not in text and "–" not in text
+        assert chr(0x2014) not in text and chr(0x2013) not in text
 
 
 def test_cli_exit_codes(gate_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -456,3 +456,22 @@ def test_catalog_input(gate_dir: Path) -> None:
     none["checks"][0]["candidate"]["query"] = {"source_id": "NOT-A-MODEL"}
     report = run(parse_config(none, base_dir=gate_dir))
     assert report.exit_code == EXIT_ERROR and "matched no dataset" in str(report.outcomes[0].error)
+
+
+def test_configuration_examples_in_the_docs_are_valid() -> None:
+    import re
+
+    import yaml
+
+    docs = Path(__file__).parent.parent / "docs"
+    if not docs.is_dir():
+        pytest.skip("docs/ not present")
+    blocks = []
+    for page in sorted(docs.rglob("*.md")):
+        for block in re.findall(r"```yaml\n(.*?)```", page.read_text(encoding="utf-8"), re.S):
+            if re.search(r"^checks:", block, re.M):
+                blocks.append((page.name, block))
+    assert len(blocks) >= 2
+    for name, block in blocks:
+        config = parse_config(yaml.safe_load(block))
+        assert config.checks, name
