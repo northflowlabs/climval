@@ -38,6 +38,35 @@ jobs:
           files: ./coverage.xml
           fail_ci_if_error: false
 
+  minimum-versions:
+    name: Lowest supported versions (Python 3.10)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Pin every core dependency to its lower bound
+        run: |
+          python - <<'EOF'
+          import pathlib, re
+          text = pathlib.Path("pyproject.toml").read_text()
+          block = re.search(r"^dependencies = \[(.*?)^\]", text, re.S | re.M).group(1)
+          pins = []
+          for spec in re.findall(r'"([^"]+)"', block):
+              name, low = re.match(r"([A-Za-z0-9_.-]+)(?:\[[^]]*\])?>=([^,;]+)", spec).groups()
+              pins.append(f"{name}=={low}")
+          pathlib.Path("constraints.txt").write_text("\n".join(pins) + "\n")
+          print("\n".join(pins))
+          EOF
+      - name: Install climval with the lower bounds
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e . "pytest>=7.4"
+          pip list
+      - name: Run tests
+        run: pytest -q
+
   core-only:
     name: Core install (no optional extras)
     runs-on: ubuntu-latest
@@ -50,7 +79,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e . pytest
-      - name: Run tests (dask, zarr, xskillscore and pint tests skip)
+      - name: Run tests (zarr, netCDF, xskillscore and pint tests skip)
         run: pytest -q
 
   extras:
