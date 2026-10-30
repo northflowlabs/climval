@@ -1,7 +1,8 @@
 """
 climval.core.suite
-=============================
-BenchmarkSuite: the central orchestrator for comparing climate models.
+==================
+BenchmarkSuite: the 0.1 multi-model interface, now a layer over
+:func:`climval.compare`.
 
 Usage
 -----
@@ -17,10 +18,12 @@ from __future__ import annotations
 import logging
 import warnings
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import xarray as xr
 
+from climval.metrics.engine import metric_units
 from climval.metrics.stats import DEFAULT_METRICS, BaseMetric
 from climval.models.schema import BenchmarkResult, ClimateModel, MetricResult
 
@@ -31,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 SYNTHETIC_DATA_NOTE = (
     "Scores computed on synthetic random data, not on model output. "
-    "They are not a validation. Load data files (source_path on both "
+    "They are not a validation. Load data (path= or data= on both "
     "models) to validate real models."
 )
 
@@ -43,8 +46,7 @@ class BenchmarkSuite:
     Parameters
     ----------
     metrics : list of BaseMetric, optional
-        Metrics to compute. Defaults to DEFAULT_METRICS (RMSE, MAE, bias,
-        Pearson r, Taylor Skill Score, percentile bias at P5 and P95).
+        Metrics to compute. Defaults to DEFAULT_METRICS.
     name : str, optional
         Label for this benchmark run.
 
@@ -53,8 +55,7 @@ class BenchmarkSuite:
     >>> suite = BenchmarkSuite(name="Europe-2000-2020")
     >>> suite.register(era5, role="reference")
     >>> suite.register(cmip6_mpi)
-    >>> suite.register(cordex_eur)
-    >>> report = suite.run(variables=["tas", "pr"])
+    >>> report = suite.run(variables=["tas", "pr"], region=climval.Box(lat=(35, 72)))
     >>> report.export("results/report.html")
     """
 
@@ -119,24 +120,37 @@ class BenchmarkSuite:
         variables: Sequence[str] | None = None,
         n_samples: int = 1000,
         seed: int = 42,
+        *,
+        synthetic: bool = False,
+        **compare_kwargs: Any,
     ) -> BenchmarkReport:
         """
         Run the benchmark.
 
-        When real data files are loaded (NetCDF/CSV), actual arrays are used.
-        In the absence of data files, synthetic arrays are generated for
-        structural validation and CI use. In that case a ``UserWarning`` is
-        emitted and each affected ``BenchmarkResult`` has ``synthetic=True``.
+        With data on every model (``source_path`` or ``data``), each
+        candidate is compared with the reference through
+        :func:`climval.compare`, which aligns grids, calendars, units and
+        missing values first. ``compare_kwargs`` (``region``, ``period``,
+        ``regrid``, ``freq`` and so on) are passed on. The values in the
+        report are the ``space_time`` sample; the full
+        :class:`~climval.Comparison` of each variable, with provenance, is in
+        ``BenchmarkResult.comparisons``.
+
+        Without data the run raises ``ValueError``, unless ``synthetic=True``
+        asks for scores on random arrays (structure and CI checks only).
+        Those runs emit a ``UserWarning`` and are flagged in the report.
 
         Parameters
         ----------
         variables : list of str, optional
-            Subset of variable names to benchmark. Defaults to all shared
-            variables between reference and candidates.
+            Variables to benchmark. Defaults to the variables declared on
+            both models that exist in both datasets.
         n_samples : int
-            Number of synthetic data points (used only when no file is loaded).
+            Number of synthetic points (synthetic=True only).
         seed : int
-            RNG seed for reproducibility.
+            RNG seed (synthetic=True only).
+        synthetic : bool
+            Score random arrays when the models carry no data.
 
         Returns
         -------
@@ -144,8 +158,7 @@ class BenchmarkSuite:
         """
         if self._reference is None:
             raise RuntimeError(
-                "No reference model registered. "
-                "Call suite.register(model, role='reference') first."
+                "No reference model registered. Call suite.register(model, role='reference') first."
             )
         if not self._candidates:
             raise RuntimeError(
@@ -153,29 +166,51 @@ class BenchmarkSuite:
                 "Call suite.register(model) to add at least one candidate."
             )
 
+        models = [self._reference, *self._candidates]
+        if synthetic:
+            if compare_kwargs:
+                raise ValueError("compare options apply to real data, not to synthetic=True")
+        else:
+            missing = [m.name for m in models if not m.has_data]
+            if missing:
+                raise ValueError(
+                    f"No data for {', '.join(missing)}. Since climval 0.2.0, "
+                    "BenchmarkSuite.run() does not score random numbers in place "
+                    "of data. Load data with load_model(path=...) or "
+                    "load_model(data=...), or call run(synthetic=True) to check "
+                    "the pipeline on random arrays (those scores are not a "
+                    "validation)."
+                )
+            warnings.warn(
+                "BenchmarkSuite.run() now aligns grids, calendars, units and "
+                "missing values through climval.compare() before scoring. Scores "
+                "differ from 0.1, which compared unaligned points. New code can "
+                "call climval.compare() directly.",
+                FutureWarning,
+                stacklevel=2,
+            )
+
         rng = np.random.default_rng(seed)
         results: list[BenchmarkResult] = []
-
         for candidate in self._candidates:
-            result = self._compare(
-                reference=self._reference,
-                candidate=candidate,
-                variables=variables,
-                rng=rng,
-                n_samples=n_samples,
-            )
+            if synthetic:
+                result = self._compare_synthetic(
+                    self._reference, candidate, variables, rng, n_samples
+                )
+            else:
+                result = self._compare_data(self._reference, candidate, variables, compare_kwargs)
             results.append(result)
 
-        synthetic = [r.candidate for r in results if r.synthetic]
-        if synthetic:
+        flagged = [r.candidate for r in results if r.synthetic]
+        if flagged:
             warnings.warn(
-                f"{SYNTHETIC_DATA_NOTE} Affected candidates: "
-                f"{', '.join(synthetic)}.",
+                f"{SYNTHETIC_DATA_NOTE} Affected candidates: {', '.join(flagged)}.",
                 UserWarning,
                 stacklevel=2,
             )
 
         from climval.core.report import BenchmarkReport as _BenchmarkReport
+
         return _BenchmarkReport(
             suite_name=self.name,
             reference=self._reference,
@@ -184,7 +219,95 @@ class BenchmarkSuite:
             metrics_used=self.metrics,
         )
 
-    def _compare(
+    @staticmethod
+    def _target_variables(
+        reference: ClimateModel,
+        candidate: ClimateModel,
+        variables: Sequence[str] | None,
+    ) -> list[str]:
+        shared = {v.name for v in reference.variables} & {v.name for v in candidate.variables}
+        if variables:
+            missing = set(variables) - shared
+            if missing:
+                logger.warning("Variables %s not present in both models: skipping.", missing)
+            return sorted(set(variables) & shared)
+        return sorted(shared)
+
+    def _compare_data(
+        self,
+        reference: ClimateModel,
+        candidate: ClimateModel,
+        variables: Sequence[str] | None,
+        compare_kwargs: dict[str, Any],
+    ) -> BenchmarkResult:
+        from climval.align.inputs import open_path
+        from climval.api import compare
+
+        def source(model: ClimateModel) -> Any:
+            # A path is handed to compare() as is, so provenance records it.
+            return model.data if model.data is not None else str(model.source_path)
+
+        ref_src, can_src = source(reference), source(candidate)
+        declared = self._target_variables(reference, candidate, variables)
+
+        def present(obj: Any) -> set[str]:
+            if isinstance(obj, str):
+                obj = open_path(obj)  # lazy: reads metadata only
+            if isinstance(obj, xr.Dataset):
+                return {str(v) for v in obj.data_vars}
+            return {str(obj.name)} if obj.name is not None else set(declared)
+
+        available = present(ref_src) & present(can_src)
+        if variables:
+            absent = set(declared) - available
+            if absent:
+                raise KeyError(
+                    f"Variables {sorted(absent)} not found in both datasets "
+                    f"({reference.name}, {candidate.name})"
+                )
+        target_vars = [v for v in declared if v in available]
+        if not target_vars:
+            raise ValueError(
+                f"No shared variable to compare between {reference.name} and "
+                f"{candidate.name}: declared {declared}, present in both datasets "
+                f"{sorted(available)}"
+            )
+
+        metric_results: list[MetricResult] = []
+        comparisons: dict[str, Any] = {}
+        for var_name in target_vars:
+            comp = compare(
+                ref_src,
+                can_src,
+                var_name,
+                metrics=self.metrics,
+                samples=("space_time",),
+                names=(reference.name, candidate.name),
+                **compare_kwargs,
+            )
+            comparisons[var_name] = comp
+            for metric in self.metrics:
+                value = comp.samples["space_time"][metric.name].sel(group="all")
+                metric_results.append(
+                    MetricResult(
+                        metric_name=metric.name,
+                        variable=var_name,
+                        value=float(value) if value.ndim == 0 else float("nan"),
+                        units=metric_units(metric, comp.units),
+                        description=metric.description(),
+                        reference_model=reference.name,
+                        candidate_model=candidate.name,
+                        metadata={"sample": "space_time"},
+                    )
+                )
+        return BenchmarkResult(
+            reference=reference.name,
+            candidate=candidate.name,
+            metrics=metric_results,
+            comparisons=comparisons,
+        )
+
+    def _compare_synthetic(
         self,
         reference: ClimateModel,
         candidate: ClimateModel,
@@ -192,130 +315,41 @@ class BenchmarkSuite:
         rng: np.random.Generator,
         n_samples: int,
     ) -> BenchmarkResult:
-        ref_var_names = {v.name for v in reference.variables}
-        can_var_names = {v.name for v in candidate.variables}
-        shared = ref_var_names & can_var_names
-
-        if variables:
-            target_vars = set(variables) & shared
-            missing = set(variables) - shared
-            if missing:
-                logger.warning(
-                    "Variables %s not present in both models: skipping.", missing
-                )
-        else:
-            target_vars = shared
-
+        target_vars = self._target_variables(reference, candidate, variables)
         metric_results: list[MetricResult] = []
-        synthetic = not (reference.source_path and candidate.source_path)
-
-        for var_name in sorted(target_vars):
-            ref_data, can_data = self._get_arrays(
-                reference, candidate, var_name, rng, n_samples
-            )
-
+        for var_name in target_vars:
+            ref_data = rng.normal(loc=288.0, scale=15.0, size=n_samples)
+            bias = rng.uniform(-3.0, 3.0)
+            noise_scale = rng.uniform(0.5, 2.5)
+            can_data = ref_data + bias + rng.normal(0, noise_scale, n_samples)
             for metric in self.metrics:
                 try:
                     value = metric.compute(ref_data, can_data)
-                    metric_results.append(
-                        MetricResult(
-                            metric_name=metric.name,
-                            variable=var_name,
-                            value=value,
-                            units=self._metric_units(metric, var_name, reference),
-                            description=metric.description(),
-                            reference_model=reference.name,
-                            candidate_model=candidate.name,
-                        )
-                    )
                 except Exception as exc:  # noqa: BLE001
-                    logger.error(
-                        "Metric '%s' failed for var '%s': %s",
-                        metric.name,
-                        var_name,
-                        exc,
+                    logger.error("Metric '%s' failed for var '%s': %s", metric.name, var_name, exc)
+                    continue
+                metric_results.append(
+                    MetricResult(
+                        metric_name=metric.name,
+                        variable=var_name,
+                        value=value,
+                        units=self._metric_units(metric, var_name, reference),
+                        description=metric.description(),
+                        reference_model=reference.name,
+                        candidate_model=candidate.name,
                     )
-
+                )
         return BenchmarkResult(
             reference=reference.name,
             candidate=candidate.name,
             metrics=metric_results,
-            notes=SYNTHETIC_DATA_NOTE if synthetic and target_vars else "",
-            synthetic=bool(synthetic and target_vars),
+            notes=SYNTHETIC_DATA_NOTE if target_vars else "",
+            synthetic=bool(target_vars),
         )
-
-    def _get_arrays(
-        self,
-        reference: ClimateModel,
-        candidate: ClimateModel,
-        var_name: str,
-        rng: np.random.Generator,
-        n_samples: int,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Return (reference_array, candidate_array) for a given variable.
-
-        If model files are loaded, real data is extracted. Otherwise,
-        synthetic arrays are produced using realistic noise models.
-        """
-        if reference.source_path and candidate.source_path:
-            return self._load_arrays_from_files(
-                reference.source_path, candidate.source_path, var_name
-            )
-
-        ref_data = rng.normal(loc=288.0, scale=15.0, size=n_samples)
-        bias = rng.uniform(-3.0, 3.0)
-        noise_scale = rng.uniform(0.5, 2.5)
-        can_data = ref_data + bias + rng.normal(0, noise_scale, n_samples)
-
-        logger.debug(
-            "Using synthetic data for %s / %s (var=%s, bias=%.2f, noise=%.2f)",
-            reference.name,
-            candidate.name,
-            var_name,
-            bias,
-            noise_scale,
-        )
-        return ref_data, can_data
-
-    def _load_arrays_from_files(
-        self, ref_path: str, can_path: str, var_name: str
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Load variable arrays from NetCDF files using xarray."""
-        try:
-            import xarray as xr
-        except ImportError as e:
-            raise ImportError(
-                "xarray is required for loading NetCDF files. "
-                "Install it with: pip install xarray netCDF4"
-            ) from e
-
-        ref_ds = xr.open_dataset(ref_path)
-        can_ds = xr.open_dataset(can_path)
-
-        if var_name not in ref_ds:
-            raise KeyError(f"Variable '{var_name}' not found in {ref_path}")
-        if var_name not in can_ds:
-            raise KeyError(f"Variable '{var_name}' not found in {can_path}")
-
-        ref_arr = ref_ds[var_name].values.ravel()
-        can_arr = can_ds[var_name].values.ravel()
-
-        ref_arr = ref_arr[~np.isnan(ref_arr)]
-        can_arr = can_arr[~np.isnan(can_arr)]
-
-        min_len = min(len(ref_arr), len(can_arr))
-        return ref_arr[:min_len], can_arr[:min_len]
 
     @staticmethod
-    def _metric_units(
-        metric: BaseMetric, var_name: str, reference: ClimateModel
-    ) -> str:
+    def _metric_units(metric: BaseMetric, var_name: str, reference: ClimateModel) -> str:
         from climval.models.schema import STANDARD_VARIABLES
 
-        if metric.name in {"pearson_r", "spearman_r", "taylor_skill_score", "nrmse"}:
-            return "dimensionless"
-        if metric.name.startswith("percentile_bias"):
-            return "%"
         var_units = STANDARD_VARIABLES.get(var_name)
-        return var_units.units if var_units else "?"
+        return metric_units(metric, var_units.units if var_units else "?")

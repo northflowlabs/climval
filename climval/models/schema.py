@@ -7,9 +7,13 @@ Typed data models for climate variables, model metadata, and benchmark results.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class ModelType(str, Enum):
@@ -66,7 +70,7 @@ class TemporalDomain:
         return delta.days / 365.25
 
     def __str__(self) -> str:
-        return f"{self.start.strftime('%Y-%m')} → {self.end.strftime('%Y-%m')}"
+        return f"{self.start.strftime('%Y-%m')} to {self.end.strftime('%Y-%m')}"
 
 
 @dataclass
@@ -135,7 +139,13 @@ class ClimateModel:
     temporal_resolution: TemporalResolution
     source_path: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    loaded_at: datetime = field(default_factory=datetime.utcnow)
+    loaded_at: datetime = field(default_factory=_utcnow)
+    data: Any = None
+    """Optional in-memory data (xarray Dataset or DataArray) used instead of source_path."""
+
+    @property
+    def has_data(self) -> bool:
+        return self.data is not None or bool(self.source_path)
 
     def summary(self) -> str:
         lines = [
@@ -169,11 +179,13 @@ class BenchmarkResult:
     reference: str
     candidate: str
     metrics: list[MetricResult] = field(default_factory=list)
-    computed_at: datetime = field(default_factory=datetime.utcnow)
+    computed_at: datetime = field(default_factory=_utcnow)
     passed: bool | None = None
     notes: str = ""
     synthetic: bool = False
     """True when the scores were computed on synthetic random arrays."""
+    comparisons: dict[str, Any] = field(default_factory=dict)
+    """climval.Comparison per variable (with alignment and provenance) for real data."""
 
     def score_summary(self) -> dict[str, float]:
         return {m.metric_name: m.value for m in self.metrics}

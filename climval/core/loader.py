@@ -1,7 +1,12 @@
 """
 climval.core.loader
 ==============================
-Unified model loader supporting NetCDF4, CSV, and synthetic data sources.
+Model descriptions for the 0.1 BenchmarkSuite API.
+
+``load_model`` describes a dataset (name, type, presets) and points at its
+data: a local NetCDF, Zarr or CSV path, a remote URL, or an in-memory xarray
+object passed as ``data=``. Nothing is read here; the data are opened lazily
+when the suite runs. New code can call :func:`climval.compare` directly.
 """
 
 from __future__ import annotations
@@ -80,6 +85,7 @@ def load_model(
     spatial_resolution: SpatialResolution = SpatialResolution.MEDIUM,
     temporal_resolution: TemporalResolution = TemporalResolution.MONTHLY,
     metadata: dict[str, Any] | None = None,
+    data: Any = None,
 ) -> ClimateModel:
     """
     Load a climate model for benchmarking.
@@ -91,8 +97,10 @@ def load_model(
     name : str, optional
         Display name. Defaults to preset name if using a preset.
     path : str or Path, optional
-        Path to NetCDF4 or CSV file. If not provided, a synthetic placeholder
-        is created (useful for testing and CI).
+        NetCDF, Zarr or CSV path, or a remote URL (gs://, s3://, https://).
+        Without ``path`` or ``data`` the model is a description only;
+        ``BenchmarkSuite.run`` then refuses to score it unless asked for
+        synthetic data explicitly.
     variables : list of str, optional
         CF-convention variable names (e.g. ["tas", "pr"]). Defaults to all
         standard variables.
@@ -106,6 +114,8 @@ def load_model(
         End of temporal domain.
     metadata : dict, optional
         Arbitrary key-value metadata.
+    data : xarray.Dataset or xarray.DataArray, optional
+        Data already open in Python (for example from intake-esm).
 
     Returns
     -------
@@ -160,7 +170,7 @@ def load_model(
 
     # Optionally load data
     if path is not None:
-        _check_file(Path(path))
+        _check_file(path)
         resolved_meta["source_path"] = str(path)
 
     model = ClimateModel(
@@ -173,14 +183,21 @@ def load_model(
         temporal_resolution=temporal_resolution,
         source_path=str(path) if path else None,
         metadata=resolved_meta,
+        data=data,
     )
 
     logger.info("Loaded model: %s", resolved_name)
     return model
 
 
-def _check_file(path: Path) -> None:
-    """Validate that a data file exists and has a supported format."""
+def _check_file(path: Path | str) -> None:
+    """Validate that a local data file exists and has a supported format.
+
+    Remote URLs are not checked here; they are opened when the suite runs.
+    """
+    if "://" in str(path):
+        return
+    path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Data file not found: {path}")
     suffix = path.suffix.lower()
