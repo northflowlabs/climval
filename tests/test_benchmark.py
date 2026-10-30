@@ -12,26 +12,20 @@ import pytest
 
 from climval import BenchmarkSuite, load_model
 from climval.metrics import (
-    RMSE,
     MAE,
+    METRIC_REGISTRY,
+    RMSE,
     MeanBias,
     NormalizedRMSE,
     PearsonCorrelation,
-    TaylorSkillScore,
     PercentileBias,
+    TaylorSkillScore,
     get_metric,
-    METRIC_REGISTRY,
 )
 from climval.models.schema import (
     ClimateModel,
     ModelType,
-    SpatialDomain,
-    SpatialResolution,
-    TemporalDomain,
-    TemporalResolution,
-    STANDARD_VARIABLES,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -237,7 +231,7 @@ class TestBenchmarkSuite:
         suite = BenchmarkSuite(name="test-suite")
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
-        report = suite.run(n_samples=200)
+        report = suite.run(synthetic=True, n_samples=200)
 
         assert report.suite_name == "test-suite"
         assert len(report.results) == 1
@@ -268,7 +262,7 @@ class TestBenchmarkSuite:
         suite.register(reference_model, role="reference")
         suite.register(load_model(preset="cmip6-mpi", name="MPI"))
         suite.register(load_model(preset="cordex-eur", name="CORDEX"))
-        report = suite.run(n_samples=100)
+        report = suite.run(synthetic=True, n_samples=100)
         assert len(report.results) == 2
 
     def test_variable_filter(
@@ -277,7 +271,7 @@ class TestBenchmarkSuite:
         suite = BenchmarkSuite()
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
-        report = suite.run(variables=["tas"], n_samples=100)
+        report = suite.run(variables=["tas"], synthetic=True, n_samples=100)
 
         for m in report.results[0].metrics:
             assert m.variable == "tas"
@@ -288,7 +282,7 @@ class TestBenchmarkSuite:
         suite = BenchmarkSuite()
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
-        report = suite.run(n_samples=50)
+        report = suite.run(synthetic=True, n_samples=50)
         d = report.to_dict()
 
         assert "suite_name" in d
@@ -304,7 +298,7 @@ class TestBenchmarkSuite:
             .register(reference_model, role="reference")
             .register(candidate_model)
         )
-        report = suite.run(n_samples=50)
+        report = suite.run(synthetic=True, n_samples=50)
         assert len(report.results) == 1
 
     def test_export_json(
@@ -316,7 +310,7 @@ class TestBenchmarkSuite:
         suite = BenchmarkSuite()
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
-        report = suite.run(n_samples=50)
+        report = suite.run(synthetic=True, n_samples=50)
         out = tmp_path / "report.json"
         report.export(str(out))
         assert out.exists()
@@ -331,7 +325,7 @@ class TestBenchmarkSuite:
         suite = BenchmarkSuite()
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
-        report = suite.run(n_samples=50)
+        report = suite.run(synthetic=True, n_samples=50)
         out = tmp_path / "report.html"
         report.export(str(out))
         assert out.exists()
@@ -347,7 +341,7 @@ class TestBenchmarkSuite:
         suite = BenchmarkSuite()
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
-        report = suite.run(n_samples=50)
+        report = suite.run(synthetic=True, n_samples=50)
         out = tmp_path / "report.md"
         report.export(str(out))
         assert out.exists()
@@ -363,7 +357,7 @@ class TestBenchmarkSuite:
         suite = BenchmarkSuite()
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
-        report = suite.run(n_samples=50)
+        report = suite.run(synthetic=True, n_samples=50)
         with pytest.raises(ValueError, match="Unsupported export format"):
             report.export(str(tmp_path / "report.xyz"))
 
@@ -374,7 +368,7 @@ class TestBenchmarkSuite:
             suite = BenchmarkSuite()
             suite.register(reference_model, role="reference")
             suite.register(candidate_model)
-            return suite.run(n_samples=100, seed=99)
+            return suite.run(synthetic=True, n_samples=100, seed=99)
 
         r1 = run_once()
         r2 = run_once()
@@ -392,7 +386,7 @@ class TestSyntheticFallback:
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
         with pytest.warns(UserWarning, match="synthetic random data"):
-            report = suite.run(n_samples=50)
+            report = suite.run(synthetic=True, n_samples=50)
         assert report.synthetic is True
         assert all(r.synthetic for r in report.results)
         assert "not a validation" in report.results[0].notes
@@ -407,7 +401,7 @@ class TestSyntheticFallback:
         suite.register(reference_model, role="reference")
         suite.register(candidate_model)
         with pytest.warns(UserWarning):
-            report = suite.run(n_samples=50)
+            report = suite.run(synthetic=True, n_samples=50)
         d = report.to_dict()
         assert d["synthetic_data"] is True
         assert d["results"][0]["synthetic"] is True
@@ -419,3 +413,71 @@ class TestSyntheticFallback:
         from climval.models.schema import BenchmarkResult
 
         assert BenchmarkResult(reference="a", candidate="b").synthetic is False
+
+
+# ---------------------------------------------------------------------------
+# 0.2 behaviour of the 0.1 API
+# ---------------------------------------------------------------------------
+
+
+class TestSuiteOnRealData:
+    """Since 0.2.0 run() aligns real data through climval.compare and refuses to
+    score random numbers unless synthetic=True is passed."""
+
+    def test_run_without_data_raises(
+        self, reference_model: ClimateModel, candidate_model: ClimateModel
+    ) -> None:
+        suite = BenchmarkSuite()
+        suite.register(reference_model, role="reference")
+        suite.register(candidate_model)
+        with pytest.raises(ValueError, match="synthetic=True"):
+            suite.run()
+
+    def test_run_on_files_aligns(self, tmp_path) -> None:
+        import xarray as xr
+
+        import climval
+
+        ref_da, can_da = climval.demo_data()
+        ref_path, can_path = tmp_path / "ref.nc", tmp_path / "can.nc"
+        ref_da.to_dataset().to_netcdf(ref_path)
+        can_da.to_dataset().to_netcdf(can_path)
+        ref = load_model("era5", name="ERA5", path=ref_path)
+        can = load_model("cmip6-mpi", name="MPI", path=can_path)
+        suite = BenchmarkSuite().register(ref, role="reference").register(can)
+        with pytest.warns(FutureWarning, match="aligns grids"):
+            report = suite.run()
+        result = report.results[0]
+        assert not result.synthetic
+        assert {m.variable for m in result.metrics} == {"tas"}  # only tas is in the files
+        expected = climval.compare(ref_da, can_da)
+        assert result.score_summary()["rmse"] == pytest.approx(expected["rmse"])
+        inputs = result.comparisons["tas"].provenance["inputs"]
+        assert inputs["reference"]["location"] == str(ref_path)
+        units = {m.metric_name: m.units for m in result.metrics}
+        assert units["rmse"] == "K" and units["pearson_r"] == "1"
+        d = report.to_dict()
+        assert d["results"][0]["provenance"]["tas"]["steps"]
+        xr.testing.assert_allclose(result.comparisons["tas"].candidate.isel(time=0),
+                                   expected.candidate.isel(time=0))
+
+    def test_run_on_in_memory_data_with_options(self) -> None:
+        import climval
+
+        ref_da, can_da = climval.demo_data()
+        ref = load_model(name="ref", variables=["tas"], data=ref_da)
+        can = load_model(name="can", variables=["tas"], data=can_da)
+        suite = BenchmarkSuite().register(ref, role="reference").register(can)
+        with pytest.warns(FutureWarning):
+            report = suite.run(region=climval.Box(lat=(30, 70)), freq="YS")
+        comp = report.results[0].comparisons["tas"]
+        assert comp.provenance["options"]["region"]["lat"] == [30.0, 70.0]
+        assert comp.aligned.frequency == "yearly"
+
+    def test_synthetic_rejects_compare_options(
+        self, reference_model: ClimateModel, candidate_model: ClimateModel
+    ) -> None:
+        suite = BenchmarkSuite().register(reference_model, role="reference")
+        suite.register(candidate_model)
+        with pytest.raises(ValueError, match="real data"):
+            suite.run(synthetic=True, regrid="nearest")
