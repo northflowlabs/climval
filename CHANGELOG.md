@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-10-30
 
 ### Fixed
 - `BenchmarkSuite.run()` on data files compared unrelated points: it flattened
@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first
 - Weighted Taylor skill score used unweighted standard deviations
 - HTML reports escape names and values
+- Console output (`climval run`, `climval list-metrics`, `climval check`) no
+  longer raises UnicodeEncodeError on a console that cannot encode a
+  character, such as piped output on Windows (cp1252): the tables are ASCII
+  and other characters are replaced. `list-metrics` describes signed metrics
+  as "smaller magnitude is better"
 
 ### Added
 - `climval.compare(reference, candidate, variable=...)`: aligns the two inputs
@@ -110,8 +115,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by their aliases. The file is validated before any data is opened,
   including the limits (finite numbers, `min` not above `max`, `abs_max` not
   negative; numeric strings such as `"1e-3"` are read as numbers) and the
-  groups, which must be ones the check's `by` produces. A check without
-  thresholds is a configuration error. Inputs shared by checks are opened
+  groups, which must be ones the check's `by` produces. A threshold on a
+  metric the check does not compute (without `metrics`, one outside the
+  default metrics, such as `spearman_r`) and a check without thresholds are
+  configuration errors. Inputs shared by checks are opened
   once per run. Output:
   console summary, JSON
   result, Markdown summary for `$GITHUB_STEP_SUMMARY` (`--github-summary`)
@@ -120,6 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration or data error. Also `--check NAME`, `--validate`, `--verbose`
   and `--quiet`, and the Python API `climval.gate`
 - `ConfigError` for invalid configuration files
+- `n_points` with every sample: the number of points pooled, where both
+  values are valid and the weight is positive
 - GitHub Action (`action.yml` in the repository root): installs climval
   (`version`, `extras`), runs `climval check`, writes the job summary,
   uploads the report as an artifact and gates the job (`fail-on`); outputs

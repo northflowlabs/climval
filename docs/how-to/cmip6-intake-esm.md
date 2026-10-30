@@ -41,9 +41,10 @@ intake-esm adds `member_id` (and `dcpp_init_year`) as dimensions. Squeeze
 them for one member, or keep `member_id` to score every member in one call:
 it is an extra dimension and climval keeps it.
 
-Each model is compared on the coarser of its grid and the reference grid
-(`target="coarser"`), so no model is interpolated to a finer grid than it
-has. Different models then end up on different grids; the
+Each model is compared on whichever of its grid and the reference grid has
+the larger cells, measured as latitude spacing times longitude spacing
+(`target="coarser"`); one axis of that grid can still be finer than the
+other's. Different models then end up on different grids; the
 [Europe example](../examples/era5_cmip6_europe.ipynb) scores five models
 this way and joins their tables.
 

@@ -65,7 +65,7 @@ holds `climval-check.json`, `climval-check.md` and `climval-check.html`.
 | `config` | (required) | path to the configuration file |
 | `version` | empty | climval version from PyPI, for example `0.2.0`. Empty: the version of the action's ref when that ref is a release tag (`@v0.2.0` installs 0.2.0), otherwise (a branch, a commit SHA) the newest release. `latest`: always the newest release. `source`: install from the action's own checkout |
 | `extras` | empty | pip extras, for example `cloud,catalog` |
-| `python-version` | `3.12` | passed to actions/setup-python; empty skips it |
+| `python-version` | `3.12` | passed to actions/setup-python; empty skips it and uses the runner's system Python, which on ubuntu-24.04 refuses pip install (PEP 668), so leave it set unless an earlier step sets up Python |
 | `checks` | empty | space-separated check names; empty runs all |
 | `args` | empty | further arguments for `climval check`, for example `--verbose` |
 | `report-dir` | `climval-report` | where the report files go |

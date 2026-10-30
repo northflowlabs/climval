@@ -62,9 +62,9 @@ fixes, a large observational archive and figures for assessment reports. The
 PCMDI Metrics Package [@lee2024] computes a standard set of performance
 metrics for CMIP models, building on the summary statistics of
 @gleckler2008. ILAMB [@collier2018] benchmarks land models against a curated
-collection of observations with a scoring system. These tools are built for
-campaigns: many models, many variables, a fixed archive and a configuration
-step before a run. xskillscore [@xskillscore] provides deterministic and
+collection of observations with a scoring system. These tools are designed
+to evaluate many models and variables against curated observational
+datasets. xskillscore [@xskillscore] provides deterministic and
 probabilistic verification metrics on xarray objects that are already
 aligned.
 
@@ -91,8 +91,9 @@ antimeridian and IPCC AR6 regions [@iturbide2020] through regionmask
 [@regionmask]), time alignment, regridding (bilinear or nearest with xarray,
 conservative through xESMF [@xesmf]), unit conversion, a paired
 missing-value mask and cell-area weights computed from the grid's cell
-bounds. By default the comparison grid is the coarser of the two, so neither
-input is interpolated to a finer grid than it has. Time is aligned by
+bounds. By default the comparison grid is the one with the larger cells
+(latitude spacing times longitude spacing); one of its axes can still be
+finer than the other input's. Time is aligned by
 calendar labels, not by timestamps: each input's native frequency is read
 from its time bounds, a `frequency` attribute or its time steps (climval
 raises when these cannot tell it), the finer input is aggregated to the
@@ -114,12 +115,12 @@ standard deviation ratio and the skill score of @taylor2001, the Kling-Gupta
 efficiency [@gupta2009] and percentile biases. Every metric is written as a weighted xarray
 reduction, so dask arrays stay lazy until one compute pass evaluates all
 metrics and samples together (alignment reads only coordinates and small
-bounds variables); percentiles of samples larger than one dask
-chunk are estimated in the same pass from weighted histograms. Extra dimensions such as an ensemble member or
+bounds variables); percentiles of samples larger than dask's
+`array.chunk-size` setting (128 MiB by default) are estimated in the same pass from weighted histograms. Extra dimensions such as an ensemble member or
 a model index are kept, so one call scores a whole ensemble. The result
 carries a provenance record with software versions, input identity
 (including CMIP attributes such as `source_id` and `tracking_id`), every
-alignment step and hashes of the aligned values.
+alignment step and hashes of a strided sample of the aligned values.
 
 `climval check` reads YAML, TOML or JSON. Each check names a reference and a
 candidate (a path, a URL or an intake-esm [@intakeesm] catalogue query), the

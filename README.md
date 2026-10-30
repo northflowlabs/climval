@@ -85,9 +85,10 @@ result = climval.compare(
 )
 ```
 
-Both datasets are compared on the coarser of the two grids by default
-(`target="coarser"`), here the 1.875 degree MPI-ESM1-2-LR grid, so a model is
-not interpolated onto a finer grid than it has. Pass `target="reference"`,
+Both datasets are compared by default on the grid with the larger cells,
+measured as latitude spacing times longitude spacing (`target="coarser"`),
+here the 1.875 degree MPI-ESM1-2-LR grid. One axis of that grid can still be
+finer than the other input's along the same axis. Pass `target="reference"`,
 `target="candidate"` or a grid of your own to compare elsewhere; the grid
 used is recorded. The same call is available as an accessor:
 `cmip.climval.compare(era5, variable=("2m_temperature", "tas"))`. The
@@ -106,7 +107,7 @@ five CMIP6 models against ERA5 and run the CI gate on real data.
 | Stations | When one input is station data (a CSV with latitude and longitude columns that do not form a full grid, or any DataArray with `lat` and `lon` on a `station` dimension), the other is sampled at the stations (bilinear or nearest) and weights are uniform |
 | Units | Converts the candidate into the reference's units: K, degC and degF; kg m-2 s-1, kg m-2 h-1, kg m-2 d-1, mm/h and mm/day; Pa and hPa; fractions and percent, built in. A bare `C` (the coulomb in UDUNITS) is rejected. pint handles other units when installed. Unit symbols are matched with their case ("MB" is not "mb"). Unknown mismatches raise unless you pass `units="ignore"` or declare the units |
 | Missing values | A point counts only where both inputs are valid |
-| Weights | Cell area in every spatial mean: `area=`, or the field named by the reference's `cell_measures`, else computed from the target grid's latitude and longitude bounds (`lat_bnds`, `lon_bnds`, or midpoints between centres). This equals cos(latitude) on a uniform grid and is correct on Gaussian and other non-uniform grids. `weights="cos_lat"` asks for cos(latitude) |
+| Weights | Cell area in every spatial mean: `area=`, or the field named by the reference's `cell_measures`, else computed from the target grid's latitude and longitude bounds (`lat_bnds`, `lon_bnds`, or midpoints between centres). This equals cos(latitude) on a uniform grid and is close to the true cell areas on Gaussian grids (within about 1% at the polar rows); pass `lat_bnds` or `area=` for exact areas. `weights="cos_lat"` asks for cos(latitude) |
 
 ### What each number is computed over
 
@@ -215,6 +216,9 @@ cannot be used. In GitHub Actions:
     extras: cloud,catalog
 ```
 
+`version` names the climval release to install. At a release tag the action
+installs that release by default; pinned to a commit SHA, it installs the
+newest release unless `version` is set, so setting it keeps the gate fixed.
 The action writes the summary to the job page and uploads the report as an
 artifact. See [Thresholds and the CI gate](https://northflowlabs.github.io/climval/how-to/ci-gate/)
 and [the GitHub Action](https://northflowlabs.github.io/climval/how-to/github-action/).
@@ -225,17 +229,17 @@ Differences are candidate minus reference. Means, variances and covariances are 
 
 | Metric | Name | Direction | Definition |
 |--------|------|-----------|-----------|
-| Mean bias | `mean_bias` | ↓ lower better (in size) | weighted mean of the difference |
-| Mean absolute error | `mae` | ↓ lower better | weighted mean of the absolute difference |
-| Root mean square error | `rmse` | ↓ lower better | square root of the weighted mean squared difference |
-| Centred RMSE | `crmse` | ↓ lower better | RMSE after removing each field's mean (Taylor 2001) |
-| Normalised RMSE | `nrmse` | ↓ lower better | RMSE divided by the reference's standard deviation |
-| Pearson correlation | `pearson_r` | ↑ higher better | weighted covariance over the product of standard deviations |
-| Spearman correlation | `spearman_r` | ↑ higher better | weighted Pearson correlation of unweighted ranks (by name, not computed by default) |
+| Mean bias | `mean_bias` | smaller magnitude is better | weighted mean of the difference |
+| Mean absolute error | `mae` | lower is better | weighted mean of the absolute difference |
+| Root mean square error | `rmse` | lower is better | square root of the weighted mean squared difference |
+| Centred RMSE | `crmse` | lower is better | RMSE after removing each field's mean (Taylor 2001) |
+| Normalised RMSE | `nrmse` | lower is better | RMSE divided by the reference's standard deviation |
+| Pearson correlation | `pearson_r` | higher is better | weighted covariance over the product of standard deviations |
+| Spearman correlation | `spearman_r` | higher is better | weighted Pearson correlation of unweighted ranks (by name, not computed by default) |
 | Standard deviation ratio | `std_ratio` | best at 1 | candidate over reference |
-| Taylor skill score | `taylor_skill_score` | ↑ higher better | Taylor (2001) eq. 5 with R0 = 1 |
-| Kling-Gupta efficiency | `kge` | ↑ higher better | Gupta et al. (2009), eq. 9 |
-| Percentile bias (P95, P5) | `percentile_bias_p95` | ↓ lower better (in size) | 100 (Q_c - Q_r) / abs(Q_r) of weighted percentiles; any percentile by name, for example `percentile_bias_p99_9` |
+| Taylor skill score | `taylor_skill_score` | higher is better | Taylor (2001) eq. 5 with R0 = 1 |
+| Kling-Gupta efficiency | `kge` | higher is better | Gupta et al. (2009), eq. 9 |
+| Percentile bias (P95, P5) | `percentile_bias_p95` | smaller magnitude is better | 100 (Q_c - Q_r) / abs(Q_r) of weighted percentiles; any percentile by name, for example `percentile_bias_p99_9` |
 
 KGE and percentile bias divide by a reference value, so they depend on where the unit scale has its zero. `climval.compare` computes both on an absolute scale: temperatures in degC or degF are shifted to K for these two metrics (recorded in the provenance), so the result is the same whatever the temperature unit.
 
@@ -352,13 +356,11 @@ Climate model evaluation has mature tools. climval works alongside them.
 
 ### ESMValTool
 
-[ESMValTool](https://www.esmvaltool.org/) is the community standard for Earth System Model evaluation, backed by ESA, CMIP and a consortium of European research institutions. If you are running **full diagnostic campaigns** against CMIP5/6 with pre-defined recipes, CMOR fixes and multi-decadal observational datasets, ESMValTool is the right tool.
-
-It is configured through YAML recipes and installed through conda, which suits a dedicated climate modelling team.
+[ESMValTool](https://www.esmvaltool.org/) runs recipe-driven diagnostics and performance metrics across CMIP ensembles, with CMOR checks and fixes in its preprocessor and a large set of observational datasets ([Righi et al. 2020](https://doi.org/10.5194/gmd-13-1179-2020); [Eyring et al. 2020](https://doi.org/10.5194/gmd-13-3383-2020)). Recipes are written in YAML. If you run full diagnostic campaigns against CMIP5 or CMIP6, ESMValTool is the right tool.
 
 ### PCMDI Metrics Package (PMP)
 
-[PMP](https://github.com/PCMDI/pcmdi_metrics), developed at Lawrence Livermore National Laboratory, provides a systematic framework for computing standardized performance metrics against observational references. It is widely cited and takes work to deploy outside a national lab.
+[PMP](https://github.com/PCMDI/pcmdi_metrics), developed at the Program for Climate Model Diagnosis and Intercomparison (Lawrence Livermore National Laboratory), computes a standard set of performance metrics for CMIP models against observational references ([Lee et al. 2024](https://doi.org/10.5194/gmd-17-3919-2024)), building on the summary statistics of Gleckler et al. (2008).
 
 ### xskillscore
 
@@ -366,35 +368,29 @@ It is configured through YAML recipes and installed through conda, which suits a
 
 ### ILAMB
 
-[ILAMB](https://www.ilamb.org/) benchmarks land models against a curated collection of observations with a scoring system (Collier et al. 2018).
+[ILAMB](https://www.ilamb.org/) benchmarks land models against a curated collection of observations with a scoring system ([Collier et al. 2018](https://doi.org/10.1029/2018MS001354)).
 
 ### ClimateLearn
 
-[ClimateLearn](https://github.com/aditya-grover/climate-learn) is a Python library oriented toward machine learning pipelines for climate, providing standardized data loading and evaluation for ERA5 and CMIP6. Relevant if your workflow is ML-first.
+[ClimateLearn](https://github.com/aditya-grover/climate-learn) is a Python library for machine learning on climate data, with data loading for ERA5 and CMIP6 and evaluation of forecasts.
 
 ### Where `climval` fits
 
-climval sits at a different layer:
+climval compares two datasets: it aligns them (grid, region, calendar, frequency, units, missing values and weights), computes the metrics and records every step. It has no recipes, no observational archive and no CMOR fixes.
 
-| | ESMValTool | PMP | **climval** |
-|---|---|---|---|
-| Installation | Complex, conda-heavy | Moderate | `pip install climval` |
-| Configuration | YAML recipes | Config files | Pure Python API |
-| CI/CD integration | Not a design goal | Not a design goal | `climval check` and a GitHub Action |
-| Custom metrics | Recipe-based | Limited | `class MyMetric(BaseMetric)` |
-| Programmatic use | Partial | Partial | First-class, on xarray and dask |
-| Scope | Full diagnostic suite | Performance metrics | Aligned, recorded comparison of two datasets |
+- It installs with `pip install climval`; xESMF, needed only for conservative regridding, is installed from conda-forge.
+- It takes xarray objects (NumPy or dask), paths, URLs and intake-esm queries.
+- It is used from Python, or from a YAML, TOML or JSON file with `climval check`, which exits 0, 1 or 2 for use in CI, and through a GitHub Action.
+- A metric of your own is a subclass of `BaseMetric`.
 
 **Use climval when you need:**
 - A reproducible validation step inside a Python pipeline, a notebook or a CI workflow
 - To compare data already open in xarray, including dask-backed Zarr in cloud storage
 - A record of exactly what was compared and how
-- Full programmatic control without YAML configuration or recipe management
 
 **Use ESMValTool when you need:**
 - Pre-built diagnostic recipes from the CMIP community
-- CMOR fixes and preprocessing across large multi-model ensembles
-- Figures and diagnostics that conform to IPCC or CMIP reporting standards
+- CMOR checks and fixes and preprocessing across large multi-model ensembles
 
 ## References
 

@@ -47,7 +47,7 @@ result = climval.compare(
 )
 ```
 
-`compare` puts both inputs on one grid (by default the coarser of the two),
+`compare` puts both inputs on one grid (by default the one with the larger cells),
 on common months and in the reference's units (see
 [Alignment](concepts/alignment.md)), computes every metric in one dask pass
 and returns a [`Comparison`](reference/compare.md). Spatial means are

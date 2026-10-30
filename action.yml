@@ -29,7 +29,11 @@ inputs:
     required: false
     default: ""
   python-version:
-    description: Python version for actions/setup-python. Empty skips setup-python.
+    description: >-
+      Python version for actions/setup-python. Empty skips setup-python and
+      uses the runner's system Python, which on ubuntu-24.04 refuses pip
+      install into the system environment (PEP 668); set a version unless an
+      earlier step has set up Python.
     required: false
     default: "3.12"
   checks:

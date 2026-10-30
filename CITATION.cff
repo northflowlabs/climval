@@ -15,11 +15,13 @@ authors:
     family-names: Pedersen
     email: tdp@northflow.no
     affiliation: Northflow Technologies AS
+    # orcid: "https://orcid.org/XXXX-XXXX-XXXX-XXXX" (to be added)
   - name: Northflow Technologies AS
     country: "NO"
     website: "https://northflow.no"
     email: hello@northflow.no
 version: 0.2.0
+date-released: 2026-10-30
 license: Apache-2.0
 repository-code: "https://github.com/northflowlabs/climval"
 url: "https://northflowlabs.github.io/climval/"

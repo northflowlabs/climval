@@ -49,7 +49,9 @@ in xarray aligns on coordinate names and values.
 ## 3. Target grid
 
 The comparison happens on one grid: `target="coarser"` (default, the input
-with larger cells; the reference when both are equal), `"reference"`,
+with larger cells, measured as latitude spacing times longitude spacing, so
+one axis of the target can be finer than the other input's; the reference
+when both are equal), `"reference"`,
 `"candidate"`, or an xarray object that carries the grid. The other input is
 regridded onto it. A curvilinear input can only be the source, so with
 `"coarser"` the rectilinear input is the target. The `target_grid` step
@@ -59,8 +61,8 @@ records which grid was used.
 and the fine field then keeps small-scale detail that the coarse one cannot
 have, which counts against the coarse model. The choice changes the numbers,
 so it is recorded. When several models are scored against one reference with
-the default, each model is compared on the coarser of its grid and the
-reference grid; pass `target="reference"` or a common grid when all of them
+the default, each model is compared on whichever of its grid and the
+reference grid has the larger cells; pass `target="reference"` or a common grid when all of them
 should share one.
 
 ## 4. Longitude
