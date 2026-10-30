@@ -131,8 +131,11 @@ class BenchmarkSuite:
         candidate is compared with the reference through
         :func:`climval.compare`, which aligns grids, calendars, units and
         missing values first. ``compare_kwargs`` (``region``, ``period``,
-        ``regrid``, ``freq`` and so on) are passed on. The values in the
-        report are the ``space_time`` sample; the full
+        ``regrid``, ``freq`` and so on) are passed on. Domains given to
+        :func:`load_model` (``lat_range``, ``lon_range``, ``time_start``,
+        ``time_end``) are applied as ``region`` and ``period`` (the overlap
+        of both models' domains) unless ``region`` or ``period`` is passed
+        here. The values in the report are the ``space_time`` sample; the full
         :class:`~climval.Comparison` of each variable, with provenance, is in
         ``BenchmarkResult.comparisons``.
 
@@ -249,6 +252,7 @@ class BenchmarkSuite:
 
         ref_src, can_src = source(reference), source(candidate)
         declared = self._target_variables(reference, candidate, variables)
+        compare_kwargs = {**_domain_options(reference, candidate, compare_kwargs), **compare_kwargs}
 
         def present(obj: Any) -> set[str]:
             if isinstance(obj, str):
@@ -353,3 +357,37 @@ class BenchmarkSuite:
 
         var_units = STANDARD_VARIABLES.get(var_name)
         return metric_units(metric, var_units.units if var_units else "?")
+
+
+def _domain_options(
+    reference: ClimateModel, candidate: ClimateModel, given: dict[str, Any]
+) -> dict[str, Any]:
+    """region and period from the models' load_model domains (overlap of both)."""
+    from climval.align.region import Box
+
+    out: dict[str, Any] = {}
+    models = [m for m in (reference, candidate)]
+    if "region" not in given:
+        boxes = [m.spatial_domain for m in models if m.region_given]
+        if boxes:
+            lat = (max(b.lat_min for b in boxes), min(b.lat_max for b in boxes))
+            lons = {(b.lon_min, b.lon_max) for b in boxes}
+            if len(lons) > 1:
+                raise ValueError(
+                    f"{reference.name} and {candidate.name} have different longitude "
+                    f"ranges {sorted(lons)}; pass region= to run() to choose one"
+                )
+            lon_t = next(iter(lons))
+            lon = None if lon_t[1] - lon_t[0] >= 360.0 else lon_t
+            if lat[0] > lat[1]:
+                raise ValueError(
+                    f"The latitude ranges of {reference.name} and {candidate.name} do not overlap"
+                )
+            out["region"] = Box(lat=lat, lon=lon)
+    if "period" not in given:
+        dated = [m.temporal_domain for m in models if m.period_given]
+        if dated:
+            start = max(d.start for d in dated)
+            end = min(d.end for d in dated)
+            out["period"] = (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+    return out

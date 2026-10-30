@@ -78,8 +78,8 @@ def load_model(
     path: str | Path | None = None,
     model_type: ModelType = ModelType.CUSTOM,
     variables: list[str] | None = None,
-    lat_range: tuple[float, float] = (-90.0, 90.0),
-    lon_range: tuple[float, float] = (-180.0, 180.0),
+    lat_range: tuple[float, float] | None = None,
+    lon_range: tuple[float, float] | None = None,
     time_start: datetime | None = None,
     time_end: datetime | None = None,
     spatial_resolution: SpatialResolution = SpatialResolution.MEDIUM,
@@ -104,14 +104,17 @@ def load_model(
     variables : list of str, optional
         CF-convention variable names (e.g. ["tas", "pr"]). Defaults to all
         standard variables.
-    lat_range : tuple of float
-        (lat_min, lat_max) in decimal degrees.
-    lon_range : tuple of float
-        (lon_min, lon_max) in decimal degrees.
+    lat_range : tuple of float, optional
+        (lat_min, lat_max) in decimal degrees. When given (or ``lon_range``),
+        ``BenchmarkSuite.run`` compares only this region, unless ``region=``
+        is passed to ``run``.
+    lon_range : tuple of float, optional
+        (lon_min, lon_max) in decimal degrees, read eastward.
     time_start : datetime, optional
-        Start of temporal domain.
+        Start of the period ``BenchmarkSuite.run`` compares, unless
+        ``period=`` is passed to ``run``.
     time_end : datetime, optional
-        End of temporal domain.
+        End of that period.
     metadata : dict, optional
         Arbitrary key-value metadata.
     data : xarray.Dataset or xarray.DataArray, optional
@@ -157,16 +160,21 @@ def load_model(
             logger.warning("Unknown variable '%s', creating generic entry.", vk)
             resolved_vars.append(ClimateVariable(name=vk, long_name=vk, units="?"))
 
-    # Spatial / temporal domains
+    # Spatial / temporal domains. Unset parts are global and 1980 to 2020 in
+    # the description, and are not applied when the suite runs.
+    region_given = lat_range is not None or lon_range is not None
+    period_given = time_start is not None or time_end is not None
+    lat_t = lat_range if lat_range is not None else (-90.0, 90.0)
+    lon_t = lon_range if lon_range is not None else (-180.0, 180.0)
     spatial_domain = SpatialDomain(
-        lat_min=lat_range[0],
-        lat_max=lat_range[1],
-        lon_min=lon_range[0],
-        lon_max=lon_range[1],
+        lat_min=lat_t[0],
+        lat_max=lat_t[1],
+        lon_min=lon_t[0],
+        lon_max=lon_t[1],
     )
-    time_start = time_start or datetime(1980, 1, 1)
-    time_end = time_end or datetime(2020, 12, 31)
-    temporal_domain = TemporalDomain(start=time_start, end=time_end)
+    temporal_domain = TemporalDomain(
+        start=time_start or datetime(1980, 1, 1), end=time_end or datetime(2020, 12, 31)
+    )
 
     # Optionally load data
     if path is not None:
@@ -184,6 +192,8 @@ def load_model(
         source_path=str(path) if path else None,
         metadata=resolved_meta,
         data=data,
+        region_given=region_given,
+        period_given=period_given,
     )
 
     logger.info("Loaded model: %s", resolved_name)

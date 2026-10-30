@@ -142,6 +142,10 @@ class ClimateModel:
     loaded_at: datetime = field(default_factory=_utcnow)
     data: Any = None
     """Optional in-memory data (xarray Dataset or DataArray) used instead of source_path."""
+    region_given: bool = False
+    """True when lat_range or lon_range was passed to load_model; BenchmarkSuite.run applies it."""
+    period_given: bool = False
+    """True when time_start or time_end was passed to load_model; BenchmarkSuite.run applies it."""
 
     @property
     def has_data(self) -> bool:
@@ -152,8 +156,8 @@ class ClimateModel:
             f"Model       : {self.name}",
             f"Type        : {self.model_type.value}",
             f"Variables   : {', '.join(v.name for v in self.variables)}",
-            f"Spatial     : {self.spatial_domain}",
-            f"Temporal    : {self.temporal_domain}",
+            f"Spatial     : {self.spatial_domain if self.region_given else 'not set (all data)'}",
+            f"Temporal    : {self.temporal_domain if self.period_given else 'not set (all data)'}",
             f"Resolution  : spatial={self.spatial_resolution.value}, "
             f"temporal={self.temporal_resolution.value}",
         ]

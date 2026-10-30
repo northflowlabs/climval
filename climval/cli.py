@@ -16,21 +16,65 @@ import argparse
 import sys
 from typing import Any
 
+_RANGE_OPTIONS = ("--region", "--lat", "--lon")
 
-def _region(value: str | None) -> Any:
-    """'S,N' or 'S,N,W,E' in degrees, or a regionmask name such as 'ar6.land:NEU'."""
+
+def _pair(values: list[str] | None, option: str) -> tuple[float, float] | None:
+    """'S,N' or 'S N' (also with negative numbers) as two floats."""
+    if not values:
+        return None
+    parts = [p for v in values for p in v.split(",") if p != ""]
+    try:
+        numbers = [float(p) for p in parts]
+    except ValueError:
+        raise SystemExit(f"climval: {option} takes two numbers, got {' '.join(values)}") from None
+    if len(numbers) != 2:
+        raise SystemExit(f"climval: {option} takes two numbers, got {' '.join(values)}")
+    return numbers[0], numbers[1]
+
+
+def _region(value: str | None, lat: Any = None, lon: Any = None) -> Any:
+    """--lat S,N and --lon W,E, or --region S,N[,W,E] or a regionmask name."""
+    from climval.align.region import Box
+
+    lat_pair = _pair(lat, "--lat")
+    lon_pair = _pair(lon, "--lon")
+    if value is not None and (lat_pair or lon_pair):
+        raise SystemExit("climval: use either --region or --lat/--lon, not both")
+    if lat_pair or lon_pair:
+        return Box(lat=lat_pair or (-90.0, 90.0), lon=lon_pair)
     if value is None:
         return None
     if ":" in value:
         return value
-    from climval.align.region import Box
-
-    parts = [float(p) for p in value.split(",")]
+    try:
+        parts = [float(p) for p in value.split(",")]
+    except ValueError:
+        raise SystemExit(
+            f"climval: --region takes S,N or S,N,W,E or a regionmask name, got {value!r}"
+        ) from None
     if len(parts) == 2:
         return Box(lat=(parts[0], parts[1]))
     if len(parts) == 4:
         return Box(lat=(parts[0], parts[1]), lon=(parts[2], parts[3]))
-    raise argparse.ArgumentTypeError("--region takes S,N or S,N,W,E or a regionmask name")
+    raise SystemExit("climval: --region takes S,N or S,N,W,E or a regionmask name")
+
+
+def _join_negative_values(argv: list[str]) -> list[str]:
+    """Let '--lat -10,10' through: argparse would read '-10,10' as an option."""
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        nxt = argv[i + 1] if i + 1 < len(argv) else None
+        if arg in _RANGE_OPTIONS and nxt is not None and nxt.startswith("-") and len(nxt) > 1:
+            if "," in nxt and (nxt[1].isdigit() or nxt[1] == "."):
+                out.append(f"{arg}={nxt}")
+                i += 2
+                continue
+        out.append(arg)
+        i += 1
+    return out
 
 
 def _variable(value: str | None) -> Any:
@@ -49,11 +93,12 @@ def cmd_compare(args: argparse.Namespace) -> None:
         args.reference,
         args.candidate,
         _variable(args.variable),
-        region=_region(args.region),
+        region=_region(args.region, args.lat, args.lon),
         period=tuple(args.period) if args.period else None,
         regrid=args.regrid,
         target=args.target,
         freq=args.freq,
+        min_coverage=args.min_coverage,
         units=args.units,
         by=args.by,
         metrics=args.metrics or None,
@@ -158,15 +203,39 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument("reference", help="Reference NetCDF, Zarr or CSV path or URL")
     cmp_p.add_argument("candidate", help="Candidate NetCDF, Zarr or CSV path or URL")
     cmp_p.add_argument("--variable", default=None, help="Name, or REF,CAND when they differ")
-    cmp_p.add_argument("--region", default=None, help="S,N or S,N,W,E, or e.g. ar6.land:NEU")
+    cmp_p.add_argument(
+        "--lat",
+        nargs="+",
+        default=None,
+        metavar="S,N",
+        help="Latitude range, for example --lat -10,10 or --lat -10 10",
+    )
+    cmp_p.add_argument(
+        "--lon",
+        nargs="+",
+        default=None,
+        metavar="W,E",
+        help="Longitude range read eastward (W > E crosses the antimeridian)",
+    )
+    cmp_p.add_argument(
+        "--region",
+        default=None,
+        help="S,N or S,N,W,E (write --region=-60,-30 when S is negative), or e.g. ar6.land:NEU",
+    )
     cmp_p.add_argument("--period", nargs=2, default=None, metavar=("START", "END"))
     cmp_p.add_argument(
         "--regrid", default="bilinear", choices=["bilinear", "nearest", "conservative"]
     )
     cmp_p.add_argument(
-        "--target", default="reference", choices=["reference", "candidate", "coarser"]
+        "--target", default="coarser", choices=["coarser", "reference", "candidate"]
     )
-    cmp_p.add_argument("--freq", default=None, help="h, D, MS or YS")
+    cmp_p.add_argument("--freq", default=None, help="h, 3h (any N dividing 24), D, MS or YS")
+    cmp_p.add_argument(
+        "--min-coverage",
+        type=float,
+        default=0.8,
+        help="Fraction of a period's steps that must be valid when aggregating (default 0.8)",
+    )
     cmp_p.add_argument("--units", default="convert", choices=["convert", "strict", "ignore"])
     cmp_p.add_argument("--by", default=None, choices=["season", "month", "year"])
     cmp_p.add_argument("--metrics", nargs="*", default=None)
@@ -218,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_join_negative_values(list(sys.argv[1:] if argv is None else argv)))
     args.func(args)
 
 
