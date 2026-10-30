@@ -1,0 +1,4 @@
+include LICENSE README.md CHANGELOG.md CITATION.cff
+recursive-include tests *.py
+recursive-include tests/data *
+global-exclude __pycache__ *.py[cod]
