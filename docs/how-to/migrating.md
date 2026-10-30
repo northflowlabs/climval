@@ -86,7 +86,7 @@ as `da.assign_attrs(frequency="mon")`.
 - `load_model` defaults `lat_range`, `lon_range`, `time_start` and
   `time_end` to `None`; when they are set, `BenchmarkSuite.run()` applies
   them as region and period.
-- xarray, pandas, dask, cftime and PyYAML are core dependencies (and tomli
+- xarray, pandas, dask, flox, cftime and PyYAML are core dependencies (and tomli
   on Python 3.10).
 - Timestamps in results are timezone aware (UTC).
 

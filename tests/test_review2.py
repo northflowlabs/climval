@@ -309,6 +309,19 @@ def test_m1_histogram_bound_against_the_weighted_ecdf() -> None:
         assert abs(value - inverse) <= 2.0**-20 * abs(inverse)
 
 
+def test_m1_histogram_and_numpy_are_at_most_one_sorted_value_apart_for_equal_weights() -> None:
+    rng = np.random.default_rng(7)
+    for _ in range(60):
+        n = int(rng.integers(20, 2000))
+        x = rng.normal(280, 10, n)
+        xa = xr.DataArray(x, dims="s").chunk(n // 3 + 1)
+        for q in (0.05, 0.5, 0.95):
+            exact = np.percentile(x, 100 * q)
+            approx = float(histogram_quantiles(xa, xa, xr.ones_like(xa), ["s"], q)[0].compute())
+            lo, hi = min(exact, approx), max(exact, approx)
+            assert int(np.sum((x > lo) & (x < hi))) <= 1
+
+
 def test_m2_spearman_ignores_zero_weight_points() -> None:
     rng = np.random.default_rng(3)
     n = 2000

@@ -53,13 +53,17 @@ step["calendars"], step["matched_periods"]
 
 Daily comparisons match days by date label, so days that exist in only one
 calendar (29 February, 30 February in a `360_day` calendar, the 31st of a
-month) drop out. If that matters, compare monthly means.
+month) drop out. If that matters, compare monthly means. Between a
+`360_day` calendar and any other, climval warns at daily and sub-daily
+frequency, because the same date label sits at a different point of the
+seasonal cycle, and suggests `freq="MS"`.
 
 ## Seasons
 
 `by="season"` groups the matched time steps into DJF, MAM, JJA and SON. By
 default (`seasons="contiguous"`) a December belongs to the following year's
-DJF and a season counts only when all three of its months are present, so
+DJF and a season counts only when all three of its months are present (for
+daily and sub-daily data, at least `min_coverage` of each month's steps), so
 the partial winters at the start and end of a period are left out and listed
 in `result.provenance["metric_notes"]["seasons"]`. `seasons="calendar"`
 pools every December, January and February of the period instead. See

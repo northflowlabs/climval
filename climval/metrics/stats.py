@@ -811,11 +811,12 @@ class PercentileBias(BaseMetric):
         bounded by the number of distinct value bins. It estimates the
         inverse of the weighted empirical distribution function to within
         2**-20 of the quantile's magnitude, clipped to the sample's range.
-        That is a different estimator from the exact method: for equal
-        weights the two differ by at most one spacing between neighbouring
-        sorted values (plus the bin width); for unequal weights xarray
-        interpolates between weighted order statistics in another way, and
-        the two can differ by a few spacings.
+        That is a different estimator from the exact method. For equal
+        weights at most one sorted sample value lies between the two (they
+        differ by at most the two gaps around the quantile, plus the bin
+        width); for unequal weights xarray interpolates between weighted
+        order statistics in another way, and the two can be a few sorted
+        values apart (up to three in the package's tests).
 
     ``"auto"`` (default) uses ``"exact"`` for NumPy arrays and for dask
     samples of at most ``max_exact_bytes`` (default: dask's

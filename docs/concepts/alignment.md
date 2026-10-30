@@ -8,8 +8,12 @@ one into the result's provenance (`result.provenance["steps"]`).
 
 `climval.align(reference, candidate, ...)` runs the steps without computing a
 metric and returns an `AlignedPair`; `climval.compare` calls it and then
-computes the metrics. Nothing is loaded into memory during alignment: on dask
-arrays every step is lazy.
+computes the metrics. On dask arrays every step is lazy and no data value is
+read. Alignment reads coordinates and, when an input is a Dataset or a file
+whose time, latitude or longitude bounds are stored as dask arrays, those
+bounds variables, all of them in one small `dask.compute` call, because the
+native frequency and the cell areas come from them. Inputs are cast to
+float64, lazily, so lazy and eager runs of float32 data give the same values.
 
 ## 1. Inputs
 
@@ -72,8 +76,11 @@ in one piece when it crosses the 0 or 180 meridian.
 A `climval.Box(lat=(south, north), lon=(west, east))` is cut before
 regridding. `west > east` crosses the antimeridian. The target grid is cut
 exactly. The grid that will be regridded keeps a margin of one cell, and for
-bilinear and nearest a wrapped column at each end when it is global, so the
-points at the edge of the box have neighbours to interpolate from.
+bilinear and nearest a wrapped column at each end when it is global and the
+box reaches the edge of the longitude frame, so the points at the edge of the
+box have neighbours to interpolate from. The wrapped columns are added after
+the time step, so they are aggregated once rather than split off every
+native time step.
 Conservative remapping gets no wrapped columns; xESMF treats a global source
 as periodic instead. A regionmask region (for example
 `"ar6.land:NEU"`) contributes its bounding box here and its polygon mask after
@@ -104,10 +111,22 @@ The time step works on calendar fields, not timestamps. See
 4. A finer input is aggregated to that frequency with a time mean (months
    aggregated to years are weighted by their length). A period's value counts
    only where at least `min_coverage` (default 0.8) of its native steps hold
-   a valid value, per grid cell; the rule is recorded.
+   a valid value, per grid cell; the rule is recorded. On dask arrays the time
+   chunks are first made to hold whole periods; a regular sub-daily series
+   (hourly to daily, say) is then summed with one task per chunk, and other
+   series are resampled through flox, which also reduces chunk by chunk. The
+   result is rechunked to whole horizontal fields and dask's automatic size
+   along time. A year of hourly ERA5 at 0.25 degrees, in the time-series,
+   tiled or one-hour-per-chunk layout, aggregates to days in a graph of tens
+   of thousands of tasks.
 5. Each period is labelled by its calendar fields (year and month for monthly
    data) and only labels present in both inputs are kept. With no common
    period climval raises `NoOverlapError`.
+
+Daily and sub-daily comparisons between a `360_day` calendar and any other
+calendar warn: days are matched by date label, so 30 February and every 31st
+day drop out, and the same label sits at a different point of the seasonal
+cycle. `freq="MS"` compares monthly means instead.
 
 *Why:* a model month stamped on day 16 of a `360_day` month and a reanalysis
 month stamped on day 1 of a Gregorian month are the same month, and matching
@@ -121,7 +140,13 @@ xESMF; it is the only option for curvilinear grids and the only one that
 averages a fine grid over coarse cells. A source cell reaches half a spacing
 beyond its centre, so target points in that half cell take the edge value;
 target points farther out, or inside a hole in the source grid, become NaN.
-climval does not extrapolate.
+climval does not extrapolate. When no target point lies on the source grid
+along latitude or longitude, it raises `NoOverlapError` instead of returning
+NaN values. Bilinear or nearest interpolation onto a coarser grid samples the
+source at the target points; climval warns and suggests
+`regrid="conservative"`. A dask source is rechunked to whole horizontal
+fields before interpolation, so a source stored in small spatial tiles does
+not turn into millions of tiny chunks.
 
 *Why:* bilinear interpolation is a reasonable default for smooth fields such
 as temperature; conservative remapping keeps area integrals and suits fluxes
@@ -130,7 +155,9 @@ such as precipitation.
 ## 8. Units
 
 The candidate is converted into the reference's units. Built in: K, degC and
-degF; kg m-2 s-1 and mm/day; Pa and hPa; fractions and percent. pint handles
+degF; kg m-2 s-1, kg m-2 h-1, kg m-2 d-1, mm/h and mm/day; Pa and hPa;
+fractions and percent. A bare `C` is the coulomb in UDUNITS and CF, so it is
+rejected with a hint to write `degC`. pint handles
 other units when installed. An unknown mismatch raises `UnitsError` unless you
 pass `units="ignore"` or declare the units with
 `units={"reference": "K", "candidate": "degC"}`. See [Units](../how-to/units.md).
@@ -152,7 +179,8 @@ field when one is given with `area=` or found through the reference's
 `cell_measures` attribute and lies on the target grid. Otherwise it computes
 the area of each cell from the target grid's latitude and longitude bounds
 (`lat_bnds` and `lon_bnds` when the Dataset has them, else midpoints between
-neighbouring centres, clipped at the poles):
+neighbouring centres, clipped at the poles; longitude bounds that wrap around
+the seam, such as 358.75 to 1.25, count as 2.5 degrees):
 
 \[
 A = R^2 \, \Delta\lambda \, (\sin\varphi_{north} - \sin\varphi_{south})

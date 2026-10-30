@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-pip install climval                      # NumPy, SciPy, pandas, xarray, dask, cftime, PyYAML
+pip install climval                      # NumPy, SciPy, pandas, xarray, dask, flox, cftime, PyYAML
 pip install "climval[cloud]"             # Zarr, fsspec, gcsfs, s3fs
 pip install "climval[cloud,catalog]"     # plus intake-esm catalogues
 ```

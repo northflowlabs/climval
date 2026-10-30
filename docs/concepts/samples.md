@@ -45,7 +45,9 @@ and August fields of the period.
 
 Seasons are contiguous by default (`seasons="contiguous"`): a December
 belongs to the DJF of the following year, and a season counts only when all
-three of its months are present. For the period 1995 to 2014 that leaves out
+three of its months are present. For daily and sub-daily data a month counts
+as present only when at least `min_coverage` (default 0.8) of its time steps
+are, so a single day of December does not complete a winter. For the period 1995 to 2014 that leaves out
 January and February 1995 (their December is outside the period) and
 December 2014 (its January and February are), so DJF holds 19 winters. The
 seasons left out are listed in `result.provenance["metric_notes"]["seasons"]`,

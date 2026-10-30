@@ -162,8 +162,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dimensionless metrics report units `"1"` instead of `"dimensionless"`
 - `DEFAULT_METRICS` adds `crmse`, `std_ratio` and `kge`; `spearman_r` is in
   `METRIC_REGISTRY` and available by name
-- `xarray`, `pandas`, `cftime` and `dask[array]` are core dependencies;
-  timestamps in results are timezone aware (UTC)
+- `xarray`, `pandas`, `cftime`, `dask[array]` and `flox` are core
+  dependencies; timestamps in results are timezone aware (UTC). flox lets
+  time aggregation of dask arrays reduce chunk by chunk
+- Large inputs: hourly data aggregated to days are summed with one task per
+  chunk, aggregated arrays are rechunked to whole horizontal fields, a dask
+  source is rechunked to whole fields before interpolation, wrapped longitude
+  columns are added after the time step, and the aligned pair shares one
+  chunking. A year of hourly 0.25 degree ERA5 against a daily 1 degree model
+  now builds in a few seconds and tens of thousands of tasks, in the
+  time-series, tiled and one-hour-per-chunk layouts (before: 0.4 to 12
+  million tasks, or a MemoryError)
+- Alignment reads no data values. Time, latitude and longitude bounds stored
+  as dask arrays are read in one small `dask.compute` call; inputs are cast
+  to float64 so that lazy and eager runs agree exactly
+- Metrics that divide by a standard deviation (Pearson and Spearman r,
+  normalised RMSE, standard deviation ratio, Taylor skill score, KGE) are NaN
+  for a constant input: a weighted standard deviation at most 1e-10 of the
+  weighted mean absolute value counts as zero
+- Percentile bias is NaN where the reference percentile is below 1% of the
+  reference's weighted mean absolute value (`min_relative`), with a note in
+  the provenance; histogram quantiles are clipped to the sample's range;
+  points with zero weight are left out of ranks and exact percentiles;
+  `method="exact"` warns for samples above `array.chunk-size`
+- Contiguous seasons of daily and sub-daily data count a month as present
+  only when at least `min_coverage` of its steps are
+- New warnings: bilinear or nearest regridding onto a coarser grid; daily
+  comparisons between a `360_day` calendar and another calendar
+- `NoOverlapError` when the grids do not overlap and when the coverage
+  threshold leaves no period; longitude bounds that wrap around the seam give
+  the right cell area; `kg m-2 h-1` and `kg m-2 d-1` are built-in units; a
+  bare `C` is rejected as a temperature unit (it is the coulomb)
 - `pyyaml` is a core dependency (and `tomli` on Python 3.10), for
   `climval check` configuration files
 - `climval.cli.main` returns the exit code

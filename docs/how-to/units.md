@@ -6,14 +6,17 @@ is computed, using the `units` attribute of each variable.
 | Quantity | Built in |
 |---|---|
 | Temperature | K, degC, degF (and spellings such as `kelvin`, `degrees_C`, `deg_C`) |
-| Precipitation flux | kg m-2 s-1 (same as mm s-1), mm h-1, mm day-1 |
+| Precipitation flux | kg m-2 s-1 (same as mm s-1), kg m-2 h-1 (mm h-1), kg m-2 d-1 (mm day-1) |
 | Pressure | Pa, hPa (mbar), kPa |
 | Fractions | 1, % |
 | Speed | m s-1, km h-1 |
 | Energy flux | W m-2 |
 
 With pint installed (`pip install "climval[units]"`) other convertible units
-work too.
+work too. Amounts per month (kg m-2 month-1) are not in the table, because a
+month has no fixed length; convert them to a rate first. A bare `C` is the
+coulomb in UDUNITS and CF, so climval rejects it as a temperature unit and
+asks for `degC`.
 
 ## Options
 

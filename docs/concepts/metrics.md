@@ -66,13 +66,32 @@ percentile, with `_` for a decimal point: `percentile_bias_p95`,
   way. On samples that fit in dask's `array.chunk-size` (128 MiB, 16.8
   million float64 values) the percentile is exact; larger samples are
   estimated in the same single pass from weighted histograms with bins
-  2**-20 of the value wide (`method="auto"`, the default). The error is at
-  most one bin width plus less than one gap between neighbouring sorted
-  values. `PercentileBias(95, method="exact")` forces the exact computation,
-  and the provenance records the method each sample used
-  (`metric_methods`).
+  2**-20 of the value wide (`method="auto"`, the default). The estimate is
+  the inverse of the weighted empirical distribution function to within one
+  bin width (2**-20 of the value), clipped to the sample's minimum and
+  maximum. That is not the same estimator as the exact method: for equal
+  weights at most one sorted sample value lies between the two; for unequal
+  weights xarray's weighted quantile interpolates differently, and the two
+  can be a few sorted values apart. `PercentileBias(95, method="exact")`
+  forces the exact computation (and warns when the sample exceeds
+  `array.chunk-size`), and the provenance records the method each sample
+  used (`metric_methods`). Points with zero weight are left out by both.
+  Percentile bias is NaN where the reference percentile is below 1% of the
+  reference's weighted mean absolute value (`min_relative=0.01`): the 5th
+  percentile of daily precipitation, for example, is near zero, and a
+  relative difference to it says nothing. The provenance then lists the
+  groups under `metric_notes["percentile_bias_undefined"]`.
 - **Spearman correlation** needs every point of the sample in memory at once.
-  It is available by name and not computed by default.
+  It is available by name and not computed by default. Points with zero
+  weight are not ranked.
+- **Constant fields.** Pearson and Spearman r, normalised RMSE, the standard
+  deviation ratio, the Taylor skill score and KGE divide by a standard
+  deviation (KGE also by a mean). They are NaN when an input it divides by is
+  constant over the sample: when its weighted standard deviation is at most
+  1e-10 of its weighted mean absolute value. The two-pass standard deviation
+  of a constant field is about 1e-16 of the value, not zero, so a test for
+  zero would divide by rounding noise. The NumPy interface
+  (`BaseMetric.compute`) applies the same rule.
 - **Errors in metrics.** An exception raised inside a metric reaches the
   caller as the same exception type (on Python 3.11 and later with a note
   naming the metric).

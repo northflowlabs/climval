@@ -113,7 +113,8 @@ root mean square error and its centred form, pattern correlation, the
 standard deviation ratio and the skill score of @taylor2001, the Kling-Gupta
 efficiency [@gupta2009] and percentile biases. Every metric is written as a weighted xarray
 reduction, so dask arrays stay lazy until one compute pass evaluates all
-metrics and samples together; percentiles of samples larger than one dask
+metrics and samples together (alignment reads only coordinates and small
+bounds variables); percentiles of samples larger than one dask
 chunk are estimated in the same pass from weighted histograms. Extra dimensions such as an ensemble member or
 a model index are kept, so one call scores a whole ensemble. The result
 carries a provenance record with software versions, input identity
