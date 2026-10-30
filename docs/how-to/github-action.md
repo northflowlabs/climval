@@ -32,9 +32,11 @@ jobs:
         uses: northflowlabs/climval@v0.2.0
         with:
           config: climval.yml
-          version: "0.2.0"
           extras: cloud,catalog
 ```
+
+Because the action is used at the release tag `v0.2.0`, it installs
+climval 0.2.0 from PyPI; see `version` below.
 
 with a `climval.yml` next to it, for example:
 
@@ -61,7 +63,7 @@ holds `climval-check.json`, `climval-check.md` and `climval-check.html`.
 | Input | Default | Meaning |
 |---|---|---|
 | `config` | (required) | path to the configuration file |
-| `version` | `latest` | climval version from PyPI, `latest`, or `source` to install from the action's own checkout |
+| `version` | empty | climval version from PyPI, for example `0.2.0`. Empty: the version of the action's ref when that ref is a release tag (`@v0.2.0` installs 0.2.0), otherwise (a branch, a commit SHA) the newest release. `latest`: always the newest release. `source`: install from the action's own checkout |
 | `extras` | empty | pip extras, for example `cloud,catalog` |
 | `python-version` | `3.12` | passed to actions/setup-python; empty skips it |
 | `checks` | empty | space-separated check names; empty runs all |
@@ -116,8 +118,11 @@ holds `climval-check.json`, `climval-check.md` and `climval-check.html`.
 extra for intake-esm catalogues. For private buckets, set the credentials
 through the usual environment variables or a prior authentication step.
 
-Pin the action to a release tag (`@v0.2.0`) or a commit SHA, and pin
-`version` to the same release, so the gate does not change under you.
+Pin the action to a release tag (`@v0.2.0`) so the gate does not change
+under you: the action and the climval it installs then come from the same
+release. If you pin the action to a commit SHA instead, also set `version`
+(for example `version: "0.2.0"`), because a SHA does not name a release and
+the default would install the newest one.
 
 ## How this repository tests the action
 

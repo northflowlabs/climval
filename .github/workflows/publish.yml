@@ -1,25 +1,48 @@
 name: Publish
 
 # Publishes to PyPI when a version tag (v0.1.1, v0.2.0, ...) is pushed. PyPI trusts this
-# workflow directly (trusted publishing), so no API token is stored anywhere.
+# workflow directly (trusted publishing), so no API token is stored anywhere. After
+# PyPI, it creates the GitHub Release for the tag with the tag's CHANGELOG.md section
+# as the notes; Zenodo archives each GitHub Release and mints its DOI. See
+# "Releasing" in CONTRIBUTING.md.
 
 on:
   push:
     tags: ["v*"]
+
+permissions:
+  contents: read
 
 jobs:
   build:
     name: Build and check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - name: The tag matches the package version
         run: |
           v=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           test "v$v" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME does not match version $v"; exit 1; }
+      - name: CHANGELOG.md and CITATION.cff are ready for the release
+        run: |
+          python - <<'PY'
+          import os, re, sys
+          v = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          changelog = open("CHANGELOG.md", encoding="utf-8").read()
+          citation = open("CITATION.cff", encoding="utf-8").read()
+          problems = []
+          if not re.search(rf"^## \[{re.escape(v)}\] - \d{{4}}-\d{{2}}-\d{{2}}$", changelog, re.M):
+              problems.append(f"CHANGELOG.md needs the heading '## [{v}] - YYYY-MM-DD'")
+          if not re.search(rf"^version: \"?{re.escape(v)}\"?$", citation, re.M):
+              problems.append(f"CITATION.cff: version must be {v}")
+          if not re.search(r"^date-released: \"?\d{4}-\d{2}-\d{2}\"?$", citation, re.M):
+              problems.append("CITATION.cff needs date-released: YYYY-MM-DD")
+          if problems:
+              sys.exit("\n".join(problems))
+          PY
       - name: Test
         run: |
           pip install -e ".[dev]"
@@ -29,7 +52,7 @@ jobs:
           pip install build twine
           python -m build
           twine check dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist
           path: dist/
@@ -44,8 +67,38 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@v1.12.4
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  release:
+    name: GitHub Release (Zenodo DOI)
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Release notes from the tag's CHANGELOG.md section
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v head="## [$v]" '
+            index($0, head) == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md || { echo "No section for $v in CHANGELOG.md"; exit 1; }
+          cat release-notes.md
+      - name: Create the release unless it exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "The release $TAG exists; not creating it again"
+          else
+            gh release create "$TAG" --verify-tag --title "climval $TAG" --notes-file release-notes.md
+          fi

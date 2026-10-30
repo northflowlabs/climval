@@ -13,11 +13,15 @@ inputs:
     required: true
   version:
     description: >-
-      climval version to install from PyPI, for example "0.2.0". "latest" installs
-      the newest release. "source" installs climval from this action's own
-      checkout, so the action and the package come from the same ref.
+      climval version to install from PyPI, for example "0.2.0". Empty (the
+      default) installs the version of the action's own ref when that ref is a
+      release tag, so northflowlabs/climval@v0.2.0 installs climval==0.2.0; for
+      any other ref (a branch, a commit SHA) it installs the newest release.
+      "latest" always installs the newest release. "source" installs climval
+      from this action's own checkout, so the action and the package come from
+      the same ref.
     required: false
-    default: latest
+    default: ""
   extras:
     description: >-
       Comma-separated pip extras, for example "cloud,catalog" for Zarr in cloud
@@ -79,7 +83,7 @@ runs:
   steps:
     - name: Set up Python
       if: inputs.python-version != ''
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: ${{ inputs.python-version }}
 
@@ -89,16 +93,33 @@ runs:
         CLIMVAL_VERSION: ${{ inputs.version }}
         CLIMVAL_EXTRAS: ${{ inputs.extras }}
         CLIMVAL_ACTION_PATH: ${{ github.action_path }}
+        CLIMVAL_ACTION_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
         extras=""
         if [ -n "${CLIMVAL_EXTRAS// /}" ]; then
           extras="[${CLIMVAL_EXTRAS// /}]"
         fi
-        case "$CLIMVAL_VERSION" in
+        version="$CLIMVAL_VERSION"
+        if [ -z "$version" ]; then
+          # The ref the workflow used for this action (uses: ...@v0.2.0). The
+          # action path ends in that ref too, which covers runners that leave
+          # github.action_ref empty in composite actions.
+          ref="${CLIMVAL_ACTION_REF:-${GITHUB_ACTION_REF:-}}"
+          if [ -z "$ref" ]; then
+            ref="$(basename "$CLIMVAL_ACTION_PATH")"
+          fi
+          if [[ "$ref" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            version="${BASH_REMATCH[1]}"
+            echo "climval check: action ref $ref, installing climval $version"
+          else
+            version=latest
+          fi
+        fi
+        case "$version" in
           source) spec="${CLIMVAL_ACTION_PATH}${extras}" ;;
-          latest|"") spec="climval${extras}" ;;
-          *) spec="climval${extras}==${CLIMVAL_VERSION}" ;;
+          latest) spec="climval${extras}" ;;
+          *) spec="climval${extras}==${version}" ;;
         esac
         python -m pip install --upgrade pip
         python -m pip install "$spec"
@@ -120,12 +141,15 @@ runs:
         if [ "$CLIMVAL_JOB_SUMMARY" = "true" ]; then
           cmd+=(--github-summary)
         fi
+        # Word splitting of the names and the free-form arguments is intended;
+        # globbing is not, so an argument such as "*" reaches climval as written.
+        set -f
         for name in $CLIMVAL_CHECKS; do
           cmd+=(--check "$name")
         done
-        # Word splitting of the free-form arguments is intended.
         # shellcheck disable=SC2206
         cmd+=($CLIMVAL_ARGS)
+        set +f
         "${cmd[@]}"
         code=$?
         case "$code" in
@@ -143,7 +167,7 @@ runs:
 
     - name: Upload the report
       if: always() && inputs.upload-report == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ inputs.report-dir }}
@@ -155,6 +179,12 @@ runs:
         CLIMVAL_EXIT: ${{ steps.check.outputs.exit-code }}
         CLIMVAL_FAIL_ON: ${{ inputs.fail-on }}
       run: |
+        # An empty or non-numeric exit code (the check step did not run to the
+        # end) counts as an error, never as a pass.
+        CLIMVAL_EXIT="${CLIMVAL_EXIT:-2}"
+        case "$CLIMVAL_EXIT" in
+          ''|*[!0-9]*) CLIMVAL_EXIT=2 ;;
+        esac
         case "$CLIMVAL_FAIL_ON" in
           never) exit 0 ;;
           error) [ "$CLIMVAL_EXIT" -ge 2 ] && { echo "climval check: configuration or data error"; exit "$CLIMVAL_EXIT"; } ; exit 0 ;;
