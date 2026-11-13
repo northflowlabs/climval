@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.2.0] - 2026-10-30
+## [0.2.0] - 2026-11-13
 
 ### Fixed
 - `BenchmarkSuite.run()` on data files compared unrelated points: it flattened
