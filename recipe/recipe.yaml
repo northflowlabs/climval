@@ -17,7 +17,7 @@ package:
 
 source:
   url: https://pypi.org/packages/source/${{ name[0] }}/${{ name }}/climval-${{ version }}.tar.gz
-  sha256: 0000000000000000000000000000000000000000000000000000000000000000
+  sha256: b1d44f1cf55f016ff24ee21f7d7ecc3e4bda2413db3ac27c812ee6c7f0142a48
 
 build:
   number: 0
